@@ -26,51 +26,115 @@
 
     <section class="intro">
       <div>
-        <p class="kicker">Prime과 Zoom을 한 화면에서 비교</p>
-        <p>마운트, 크롭 팩터, 렌즈 스타일을 직접 만들고 35mm 환산 화각 또는 실제 초점거리 기준으로 로드맵을 확인하세요.</p>
+        <p class="kicker">Prime과 Zoom을 보기 좋게 정리</p>
+        <p>렌즈 이름을 붙여 넣고 초점거리만 확인하세요. 축 기준, 라벨 표기, 텔레컨버터 범위를 따로 조정해서 바로 공유 가능한 로드맵을 만들 수 있습니다.</p>
       </div>
       <div id="mountSummary" class="summary" aria-label="마운트 요약"></div>
     </section>
 
     <main class="main-grid">
       <aside class="sidebar" aria-label="로드맵 편집 패널">
-        <section class="panel">
+        <section class="panel panel-accent">
           <div class="panel-head">
             <span class="step">01</span>
             <div>
-              <h2>차트 설정</h2>
-              <p>표시 기준과 축 범위를 정합니다.</p>
+              <h2>렌즈 빠르게 추가</h2>
+              <p>렌즈명에 있는 12-40mm, 35mm 같은 값을 자동으로 읽습니다.</p>
             </div>
           </div>
-          <label class="field"><span>표시 기준</span>
-            <select id="displayMode">
-              <option value="equiv" selected>35mm 환산 화각 기준</option>
-              <option value="actual">실제 초점거리 기준</option>
-            </select>
-          </label>
-          <label class="field"><span>축 스케일</span>
-            <select id="scaleMode">
-              <option value="log" selected>로드맵형 로그 스케일</option>
-              <option value="linear">선형 스케일</option>
-            </select>
-          </label>
-          <label class="field"><span>차트 제목</span><input id="chartTitle" type="text" value="My Lens Roadmap" /></label>
+
           <div class="two-col">
-            <label class="field"><span>축 최소값</span><input id="axisMin" type="number" value="14" min="1" step="1" /></label>
-            <label class="field"><span>축 최대값</span><input id="axisMax" type="number" value="1600" min="10" step="10" /></label>
+            <label class="field"><span>마운트</span><select id="lensMount"></select></label>
+            <label class="field"><span>스타일</span><select id="lensStyle"></select></label>
           </div>
-          <div class="toggle-row">
-            <label class="switch" aria-label="텔레컨버터 확장 범위 표시"><input id="showTeleconverters" type="checkbox" checked><span></span></label>
-            <div><strong>텔레컨버터 확장 범위 표시</strong><p>1.4x와 2x 확장을 점선으로 표시합니다.</p></div>
+
+          <label class="field">
+            <span>렌즈 이름</span>
+            <input id="lensName" type="text" placeholder="예: M.Zuiko Digital ED 12-40mm F2.8 PRO II" />
+          </label>
+
+          <div class="inline-actions">
+            <button id="parseLensBtn" class="btn btn-soft" type="button">이름에서 mm 자동 입력</button>
+            <span class="form-note">단렌즈는 시작과 끝 mm가 같으면 됩니다.</span>
           </div>
+
+          <div class="three-col">
+            <label class="field"><span>시작 mm</span><input id="focalStart" type="number" min="0.1" step="0.1" placeholder="12" /></label>
+            <label class="field"><span>끝 mm</span><input id="focalEnd" type="number" min="0.1" step="0.1" placeholder="40" /></label>
+            <label class="field"><span>유형</span>
+              <select id="lensType">
+                <option value="prime">Prime</option>
+                <option value="zoom" selected>Zoom</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="tc-box">
+            <p>텔레컨버터 호환</p>
+            <label class="check"><input id="tc14" type="checkbox"> 1.4x</label>
+            <label class="check"><input id="tc20" type="checkbox"> 2x</label>
+          </div>
+
+          <div id="lensPreview" class="lens-preview">렌즈 정보를 입력하면 실제/환산 화각이 여기에 표시됩니다.</div>
+          <button id="addLensBtn" class="btn btn-primary full">렌즈 추가</button>
         </section>
 
         <section class="panel">
           <div class="panel-head">
             <span class="step">02</span>
             <div>
+              <h2>차트 출력 설정</h2>
+              <p>축은 배치 기준, 라벨은 표기 방식을 따로 선택합니다.</p>
+            </div>
+          </div>
+
+          <label class="field"><span>차트 제목</span><input id="chartTitle" type="text" value="My Lens Roadmap" /></label>
+
+          <div class="two-col">
+            <label class="field"><span>차트 축 기준</span>
+              <select id="displayMode">
+                <option value="equiv" selected>35mm 환산 기준</option>
+                <option value="actual">실제 초점거리 기준</option>
+              </select>
+            </label>
+            <label class="field"><span>렌즈 라벨 표기</span>
+              <select id="labelMode">
+                <option value="equiv" selected>35mm 환산만</option>
+                <option value="actual">실제 초점거리만</option>
+                <option value="both">둘 다 표시</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="two-col">
+            <label class="field"><span>축 스케일</span>
+              <select id="scaleMode">
+                <option value="log" selected>로드맵형 로그</option>
+                <option value="linear">선형</option>
+              </select>
+            </label>
+            <label class="field"><span>축 자동 맞춤</span>
+              <button id="autoFitAxisBtn" class="btn full" type="button">현재 렌즈에 맞추기</button>
+            </label>
+          </div>
+
+          <div class="two-col">
+            <label class="field"><span>축 최소값</span><input id="axisMin" type="number" value="14" min="1" step="1" /></label>
+            <label class="field"><span>축 최대값</span><input id="axisMax" type="number" value="1600" min="10" step="10" /></label>
+          </div>
+
+          <div class="toggle-row">
+            <label class="switch" aria-label="텔레컨버터 확장 범위 표시"><input id="showTeleconverters" type="checkbox" checked><span></span></label>
+            <div><strong>텔레컨버터 확장 범위 표시</strong><p>1.4x와 2x 확장을 얇은 점선으로 표시합니다.</p></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <span class="step">03</span>
+            <div>
               <h2>마운트 만들기</h2>
-              <p>센서 크기나 시스템별로 행을 나눕니다.</p>
+              <p>프리셋을 누르면 바로 추가되고, 이미 있으면 선택만 됩니다.</p>
             </div>
           </div>
           <label class="field"><span>새 마운트 이름</span><input id="newMountName" type="text" placeholder="예: Nikon Z, Sony E, L Mount" /></label>
@@ -91,10 +155,10 @@
 
         <section class="panel">
           <div class="panel-head">
-            <span class="step">03</span>
+            <span class="step">04</span>
             <div>
               <h2>스타일 만들기</h2>
-              <p>브랜드 라인업이나 등급을 구분합니다.</p>
+              <p>브랜드 라인업, 등급, 시대별 렌즈를 구분할 때 씁니다.</p>
             </div>
           </div>
           <label class="field"><span>새 스타일 이름</span><input id="newStyleName" type="text" placeholder="예: PRO, GM, L, Vintage, Budget" /></label>
@@ -127,40 +191,9 @@
           </div>
         </section>
 
-        <section class="panel panel-accent">
-          <div class="panel-head">
-            <span class="step">04</span>
-            <div>
-              <h2>렌즈 추가</h2>
-              <p>단렌즈는 시작과 끝 mm를 같게 넣으면 됩니다.</p>
-            </div>
-          </div>
-          <label class="field"><span>마운트</span><select id="lensMount"></select></label>
-          <label class="field"><span>렌즈 이름</span><input id="lensName" type="text" placeholder="예: M.Zuiko Digital ED 12-40mm F2.8 PRO II" /></label>
-          <div class="two-col">
-            <label class="field"><span>시작 mm</span><input id="focalStart" type="number" min="0.1" step="0.1" placeholder="12" /></label>
-            <label class="field"><span>끝 mm</span><input id="focalEnd" type="number" min="0.1" step="0.1" placeholder="40" /></label>
-          </div>
-          <div class="two-col">
-            <label class="field"><span>렌즈 유형</span>
-              <select id="lensType">
-                <option value="prime">Prime</option>
-                <option value="zoom" selected>Zoom</option>
-              </select>
-            </label>
-            <label class="field"><span>스타일</span><select id="lensStyle"></select></label>
-          </div>
-          <div class="tc-box">
-            <p>텔레컨버터 호환</p>
-            <label class="check"><input id="tc14" type="checkbox"> 1.4x</label>
-            <label class="check"><input id="tc20" type="checkbox"> 2x</label>
-          </div>
-          <button id="addLensBtn" class="btn btn-primary full">렌즈 추가</button>
-        </section>
-
         <section class="panel compact">
           <div class="button-row">
-            <button id="loadSampleBtn" class="btn">샘플 불러오기</button>
+            <button id="loadSampleBtn" class="btn">샘플 다시 불러오기</button>
             <button id="clearBtn" class="btn btn-danger">전체 삭제</button>
           </div>
         </section>
@@ -172,9 +205,9 @@
             <div>
               <p class="section-label">Live Preview</p>
               <h2 id="liveTitle">My Lens Roadmap</h2>
-              <p id="liveDesc">35mm 환산 화각 기준</p>
+              <p id="liveDesc">35mm 환산 기준 · 로그 스케일</p>
             </div>
-            <div class="legend-note">가로 스크롤로 긴 로드맵을 확인할 수 있습니다.</div>
+            <div class="legend-note">완성된 도표는 PNG 또는 SVG로 저장할 수 있습니다.</div>
           </div>
           <div id="emptyState" class="empty-state" hidden>
             <strong>아직 표시할 렌즈가 없습니다.</strong>

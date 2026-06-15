@@ -3,12 +3,12 @@ const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `id-${Date.now()}-$
 
 const defaultData = {
   mounts: [
-    { id: "mft", name: "Micro Four Thirds", crop: 2, color: "#0057D9" },
+    { id: "mft", name: "Micro Four Thirds", crop: 2, color: "#2563EB" },
     { id: "ft", name: "Four Thirds", crop: 2, color: "#64748B" },
     { id: "film", name: "35mm Film", crop: 1, color: "#111827" }
   ],
   styles: [
-    { id: "premium", name: "PRO / Leica", color: "#0057D9", dash: "solid", width: 5, weight: 800 },
+    { id: "premium", name: "PRO / Leica", color: "#2563EB", dash: "solid", width: 5, weight: 800 },
     { id: "standard", name: "Standard", color: "#667085", dash: "solid", width: 5, weight: 650 },
     { id: "vintage", name: "Vintage / Film", color: "#111827", dash: "solid", width: 5, weight: 800 }
   ],
@@ -20,17 +20,14 @@ const defaultData = {
     { id: uid(), mountId: "mft", type: "prime", styleId: "premium", name: "M.Zuiko Digital ED 45mm F1.2 PRO", start: 45, end: 45 },
     { id: uid(), mountId: "mft", type: "prime", styleId: "standard", name: "M.Zuiko Digital 45mm F1.8", start: 45, end: 45 },
     { id: uid(), mountId: "mft", type: "prime", styleId: "standard", name: "M.Zuiko Digital ED 75mm F1.8", start: 75, end: 75 },
-
     { id: uid(), mountId: "mft", type: "zoom", styleId: "premium", name: "M.Zuiko Digital ED 7-14mm F2.8 PRO", start: 7, end: 14 },
     { id: uid(), mountId: "mft", type: "zoom", styleId: "premium", name: "M.Zuiko Digital ED 12-40mm F2.8 PRO II", start: 12, end: 40 },
     { id: uid(), mountId: "mft", type: "zoom", styleId: "premium", name: "M.Zuiko Digital ED 12-100mm F4.0 IS PRO", start: 12, end: 100 },
     { id: uid(), mountId: "mft", type: "zoom", styleId: "premium", name: "M.Zuiko Digital ED 40-150mm F2.8 PRO", start: 40, end: 150, tc14: true, tc20: true },
     { id: uid(), mountId: "mft", type: "zoom", styleId: "premium", name: "M.Zuiko Digital ED 50-200mm F2.8 IS PRO", start: 50, end: 200, tc14: true, tc20: true },
     { id: uid(), mountId: "mft", type: "zoom", styleId: "standard", name: "M.Zuiko Digital ED 100-400mm F5.0-6.3 IS II", start: 100, end: 400, tc14: true, tc20: true },
-
     { id: uid(), mountId: "ft", type: "zoom", styleId: "standard", name: "Zuiko Digital 14-45mm F3.5-5.6", start: 14, end: 45 },
     { id: uid(), mountId: "ft", type: "zoom", styleId: "standard", name: "Zuiko Digital 40-150mm F3.5-4.5", start: 40, end: 150 },
-
     { id: uid(), mountId: "film", type: "prime", styleId: "vintage", name: "Olympus XA F.Zuiko 35mm F2.8", start: 35, end: 35 },
     { id: uid(), mountId: "film", type: "prime", styleId: "vintage", name: "OM-System Zuiko Auto-S 50mm F1.8", start: 50, end: 50 }
   ]
@@ -52,21 +49,21 @@ function loadState() {
 }
 
 function migrateV2(old) {
-  const migrated = clone(defaultData);
-  migrated.mounts = old.mounts;
-  migrated.styles = clone(defaultData.styles);
-  migrated.lenses = old.lenses.map(l => ({
-    id: l.id || uid(),
-    mountId: l.mountId,
-    type: l.type,
-    styleId: l.styleId || (l.style === "premium" || l.style === "pro" ? "premium" : l.style === "vintage" ? "vintage" : "standard"),
-    name: l.name,
-    start: l.start,
-    end: l.end,
-    tc14: !!l.tc14,
-    tc20: !!l.tc20
-  }));
-  return migrated;
+  return {
+    mounts: old.mounts,
+    styles: clone(defaultData.styles),
+    lenses: old.lenses.map(l => ({
+      id: l.id || uid(),
+      mountId: l.mountId,
+      type: l.type,
+      styleId: l.styleId || (l.style === "premium" || l.style === "pro" ? "premium" : l.style === "vintage" ? "vintage" : "standard"),
+      name: l.name,
+      start: l.start,
+      end: l.end,
+      tc14: !!l.tc14,
+      tc20: !!l.tc20
+    }))
+  };
 }
 
 function saveState() { localStorage.setItem("lensRoadmapStudioV3", JSON.stringify(state)); }
@@ -76,6 +73,10 @@ function styleById(id) { return state.styles.find(s => s.id === id) || state.sty
 function clean(n) {
   const v = Math.round(Number(n) * 10) / 10;
   return Number.isInteger(v) ? String(v) : String(v);
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function dashArray(style) {
@@ -102,6 +103,48 @@ function equivRange(lens) {
   return s === e ? `${clean(s)}mm` : `${clean(s)}-${clean(e)}mm`;
 }
 
+function axisModeText() {
+  return $("displayMode").value === "equiv" ? "35mm 환산 기준" : "실제 초점거리 기준";
+}
+
+function labelModeText() {
+  const mode = $("labelMode")?.value || "equiv";
+  if (mode === "actual") return "실제 초점거리";
+  if (mode === "both") return "실제 + 35mm 환산";
+  return "35mm 환산";
+}
+
+function labelRange(lens) {
+  const mode = $("labelMode")?.value || "equiv";
+  if (mode === "actual") return actualRange(lens);
+  if (mode === "both") {
+    const actual = actualRange(lens);
+    const equiv = equivRange(lens);
+    return actual === equiv ? actual : `${actual} / ${equiv} eq`;
+  }
+  return `${equivRange(lens)} eq`;
+}
+
+function shortText(text, max = 42) {
+  const cleanText = String(text || "").trim();
+  return cleanText.length > max ? `${cleanText.slice(0, max - 3)}...` : cleanText;
+}
+
+function textWidth(text, min = 84, max = 360, px = 7.1) {
+  return Math.max(min, Math.min(max, String(text).length * px + 24));
+}
+
+function parseFocalRange(text) {
+  const normalized = String(text || "").replace(/\u2013|\u2014/g, "-");
+  const zoom = normalized.match(/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*mm/i);
+  if (zoom) return { start: Number(zoom[1]), end: Number(zoom[2]), type: "zoom" };
+
+  const prime = normalized.match(/(\d+(?:\.\d+)?)\s*mm/i);
+  if (prime) return { start: Number(prime[1]), end: Number(prime[1]), type: "prime" };
+
+  return null;
+}
+
 function scaleFactory(min, max, width) {
   if ($("scaleMode").value === "log") {
     const a = Math.log(min);
@@ -112,7 +155,7 @@ function scaleFactory(min, max, width) {
 }
 
 function ticksFor(min, max) {
-  const base = [10, 14, 16, 20, 24, 28, 35, 40, 50, 70, 85, 100, 135, 150, 200, 300, 400, 560, 600, 800, 1000, 1200, 1600, 2000];
+  const base = [7, 8, 10, 12, 14, 16, 18, 20, 24, 28, 35, 40, 50, 70, 85, 100, 135, 150, 200, 300, 400, 560, 600, 800, 1000, 1200, 1600, 2000, 2400];
   return base.filter(v => v >= min && v <= max);
 }
 
@@ -156,122 +199,170 @@ function renderChart() {
     svg.parentElement.hidden = rows.length === 0;
   }
 
-  const rowH = 54;
-  const groupHeaderH = 42;
-  const top = 100;
-  const leftType = 170;
-  const leftChart = 280;
-  const right = 42;
-  const width = 1560;
+  const rowH = 62;
+  const groupHeaderH = 48;
+  const top = 132;
+  const leftType = 168;
+  const leftChart = 326;
+  const right = 58;
+  const width = 1580;
+  const footerH = 78;
 
   let contentH = 0;
-  rows.forEach(r => contentH += r.kind === "mountHeader" ? groupHeaderH : Math.max(86, r.items.length * rowH + 34));
+  rows.forEach(r => contentH += r.kind === "mountHeader" ? groupHeaderH : Math.max(96, r.items.length * rowH + 34));
 
-  const height = Math.max(720, top + contentH + 86);
+  const height = Math.max(740, top + contentH + footerH);
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("width", width);
   svg.setAttribute("height", height);
 
-  makeEl(svg, "rect", { x: 0, y: 0, width, height, fill: "#ffffff" });
+  makeEl(svg, "rect", { x: 0, y: 0, width, height, fill: "#F7FAFC" });
+  makeEl(svg, "rect", { x: 18, y: 18, width: width - 36, height: height - 36, rx: 26, fill: "#FFFFFF", stroke: "#D9E2EE", "stroke-width": 1.2 });
+  makeEl(svg, "rect", { x: 18, y: 18, width: width - 36, height: 80, rx: 26, fill: "#F2F7FF" });
+  makeEl(svg, "rect", { x: 18, y: 72, width: width - 36, height: 26, fill: "#F2F7FF" });
 
   const title = $("chartTitle").value.trim() || "Lens Roadmap";
-  $("liveTitle").textContent = title;
-  const modeText = $("displayMode").value === "equiv" ? "35mm 환산 화각 기준" : "실제 초점거리 기준";
-  $("liveDesc").textContent = `${modeText} · ${$("scaleMode").value === "log" ? "로그 스케일" : "선형 스케일"}`;
+  const modeText = axisModeText();
+  const scaleText = $("scaleMode").value === "log" ? "로그 스케일" : "선형 스케일";
 
-  makeText(svg, { x: 22, y: 34, "font-size": 26, "font-weight": 850, fill: "#111827" }, title);
-  makeText(svg, { x: leftChart, y: 34, "font-size": 14, "font-weight": 800, fill: "#334155" }, modeText);
+  $("liveTitle").textContent = title;
+  $("liveDesc").textContent = `${modeText} · 라벨 ${labelModeText()} · ${scaleText}`;
+
+  makeText(svg, { x: 44, y: 52, "font-size": 28, "font-weight": 850, fill: "#111827" }, title);
+  makeText(svg, { x: 44, y: 78, "font-size": 13, "font-weight": 700, fill: "#475569" }, `${modeText} · 라벨 ${labelModeText()} · ${scaleText}`);
 
   const min = Math.max(0.1, Number($("axisMin").value) || 10);
   const max = Math.max(min + 1, Number($("axisMax").value) || 1600);
   const chartW = width - leftChart - right;
   const x = scaleFactory(min, max, chartW);
   const ticks = ticksFor(min, max);
+  const plotBottom = height - footerH;
 
-  makeEl(svg, "rect", { x: 14, y: top - 32, width: width - 28, height: height - top - 42, fill: "none", stroke: "#111827", "stroke-width": 1.3 });
-  makeEl(svg, "line", { x1: leftType - 12, y1: top - 32, x2: leftType - 12, y2: height - 74, stroke: "#111827", "stroke-width": 1.2 });
-  makeEl(svg, "line", { x1: leftChart - 14, y1: top - 32, x2: leftChart - 14, y2: height - 74, stroke: "#111827", "stroke-width": 1.2 });
+  makeEl(svg, "rect", { x: 30, y: top - 44, width: width - 60, height: plotBottom - top + 44, rx: 18, fill: "#FBFCFE", stroke: "#DCE5F0", "stroke-width": 1 });
+  makeEl(svg, "line", { x1: leftType, y1: top - 44, x2: leftType, y2: plotBottom, stroke: "#DCE5F0", "stroke-width": 1 });
+  makeEl(svg, "line", { x1: leftChart - 18, y1: top - 44, x2: leftChart - 18, y2: plotBottom, stroke: "#DCE5F0", "stroke-width": 1 });
 
   ticks.forEach(t => {
     const px = leftChart + x(t);
-    makeEl(svg, "line", { x1: px, y1: top - 32, x2: px, y2: height - 74, stroke: "#CBD5E1", "stroke-width": 0.9, "stroke-dasharray": "5 7" });
-    makeEl(svg, "line", { x1: px, y1: top - 48, x2: px, y2: top - 32, stroke: "#111827", "stroke-width": 1.1 });
-    makeText(svg, { x: px, y: top - 55, "font-size": 13, "font-weight": 850, "text-anchor": "middle", fill: "#111827" }, `${clean(t)}mm`);
+    makeEl(svg, "line", { x1: px, y1: top - 44, x2: px, y2: plotBottom, stroke: "#E4EBF4", "stroke-width": 1, "stroke-dasharray": "4 8" });
+    makeEl(svg, "rect", { x: px - 23, y: top - 72, width: 46, height: 22, rx: 11, fill: "#FFFFFF", stroke: "#DCE5F0", "stroke-width": 1 });
+    makeText(svg, { x: px, y: top - 57, "font-size": 11, "font-weight": 850, "text-anchor": "middle", fill: "#334155" }, `${clean(t)}mm`);
   });
 
-  makeText(svg, { x: leftChart - 18, y: top - 55, "font-size": 13, "font-weight": 850, "text-anchor": "end", fill: "#111827" }, "focal length");
+  makeText(svg, { x: leftChart - 22, y: top - 57, "font-size": 12, "font-weight": 850, "text-anchor": "end", fill: "#475569" }, "초점거리");
 
   let y = top;
-  rows.forEach(row => {
+  rows.forEach((row, rowIndex) => {
     if (row.kind === "mountHeader") {
       const m = row.mount;
-      makeEl(svg, "rect", { x: 15, y: y - 1, width: width - 30, height: groupHeaderH, fill: "#F8FAFC", stroke: "#E2E8F0", "stroke-width": 1 });
-      makeEl(svg, "circle", { cx: 35, cy: y + 20, r: 6, fill: m.color });
-      makeText(svg, { x: 50, y: y + 25, "font-size": 16, "font-weight": 850, fill: "#111827" }, `${m.name}  ·  crop x${clean(m.crop)}`);
+      const count = state.lenses.filter(l => l.mountId === m.id).length;
+      makeEl(svg, "rect", { x: 30, y, width: width - 60, height: groupHeaderH, fill: "#F8FBFF", stroke: "#E5ECF5", "stroke-width": 1 });
+      makeEl(svg, "rect", { x: 30, y, width: 7, height: groupHeaderH, fill: m.color });
+      makeEl(svg, "circle", { cx: 56, cy: y + 24, r: 7, fill: m.color });
+      makeText(svg, { x: 72, y: y + 29, "font-size": 16, "font-weight": 850, fill: "#111827" }, `${m.name} · crop x${clean(m.crop)} · ${count} lenses`);
       y += groupHeaderH;
       return;
     }
 
     const { type, items } = row;
-    const blockH = Math.max(86, items.length * rowH + 34);
-    makeEl(svg, "line", { x1: 14, y1: y, x2: width - 14, y2: y, stroke: "#111827", "stroke-width": 1.05 });
-    makeText(svg, { x: leftType - 68, y: y + blockH / 2 + 7, "font-size": 18, "font-weight": 850, "text-anchor": "middle", fill: "#111827" }, type === "prime" ? "Prime" : "Zoom");
+    const blockH = Math.max(96, items.length * rowH + 34);
+    const fill = rowIndex % 2 ? "#FFFFFF" : "#FCFDFF";
+    makeEl(svg, "rect", { x: 30, y, width: width - 60, height: blockH, fill, stroke: "#E7EDF5", "stroke-width": 1 });
+    makeEl(svg, "rect", { x: 58, y: y + blockH / 2 - 17, width: 84, height: 34, rx: 17, fill: type === "prime" ? "#EEF6FF" : "#F2F8F4", stroke: type === "prime" ? "#BFDBFE" : "#BBE4C6", "stroke-width": 1 });
+    makeText(svg, { x: 100, y: y + blockH / 2 + 6, "font-size": 13, "font-weight": 900, "text-anchor": "middle", fill: type === "prime" ? "#1D4ED8" : "#15803D" }, type === "prime" ? "Prime" : "Zoom");
 
     items.forEach((lens, idx) => {
-      const cy = y + 34 + idx * rowH;
+      const cy = y + 42 + idx * rowH;
       const style = styleById(lens.styleId);
       const start = Math.min(displayValue(lens, Number(lens.start)), displayValue(lens, Number(lens.end)));
       const end = Math.max(displayValue(lens, Number(lens.start)), displayValue(lens, Number(lens.end)));
-      const startX = leftChart + x(start);
-      const endX = leftChart + x(end);
+      const startX = clamp(leftChart + x(start), leftChart, leftChart + chartW);
+      const endX = clamp(leftChart + x(end), leftChart, leftChart + chartW);
+      const label = shortText(lens.name, 46);
+      const range = labelRange(lens);
+      const rangeW = textWidth(range, 92, 230, 6.6);
 
       if (type === "prime" || start === end) {
-        makeEl(svg, "circle", { cx: startX, cy, r: Math.max(5.4, Number(style.width) + 1.4), fill: style.color });
-        makeText(svg, { x: startX, y: cy - 13, "font-size": 13, "font-weight": style.weight, "text-anchor": "middle", fill: style.color }, lens.name);
-      } else {
-        makeEl(svg, "line", { x1: startX, y1: cy, x2: endX, y2: cy, stroke: style.color, "stroke-width": style.width, "stroke-linecap": "round", "stroke-dasharray": dashArray(style) });
-        makeEl(svg, "circle", { cx: startX, cy, r: 5.8, fill: style.color });
-        makeEl(svg, "circle", { cx: endX, cy, r: 5.8, fill: style.color });
-        const mid = $("scaleMode").value === "log" ? Math.sqrt(start * end) : (start + end) / 2;
-        makeText(svg, { x: leftChart + x(mid), y: cy - 13, "font-size": 13, "font-weight": style.weight, "text-anchor": "middle", fill: style.color }, lens.name);
-        makeText(svg, { x: startX, y: cy + 20, "font-size": 11, "text-anchor": "middle", fill: "#111827" }, `${clean(start)}mm`);
-        makeText(svg, { x: endX, y: cy + 20, "font-size": 11, "text-anchor": "middle", fill: "#111827" }, `${clean(end)}mm`);
+        makeEl(svg, "line", { x1: startX, y1: cy + 12, x2: startX, y2: cy - 14, stroke: style.color, "stroke-width": 2, opacity: .35 });
+        makeEl(svg, "circle", { cx: startX, cy, r: Math.max(6, Number(style.width) + 1.8), fill: "#FFFFFF", stroke: style.color, "stroke-width": 3 });
 
-        if ($("showTeleconverters").checked) {
-          if (lens.tc14) drawTc(svg, leftChart, x, endX, cy + 8, end * 1.4, max, "#9A9A9A", "6 6");
-          if (lens.tc20) drawTc(svg, leftChart, x, endX, cy - 8, end * 2, max, "#C0C0C0", "3 5");
-        }
+        const labelW = textWidth(label, 150, 320, 6.6);
+        const labelX = clamp(startX - labelW / 2, leftChart + 8, width - right - labelW);
+        const rangeX = clamp(startX - rangeW / 2, leftChart + 8, width - right - rangeW);
+        makeEl(svg, "rect", { x: labelX, y: cy - 33, width: labelW, height: 23, rx: 11.5, fill: "#FFFFFF", stroke: "#DDE6F1", "stroke-width": 1 });
+        makeText(svg, { x: labelX + labelW / 2, y: cy - 17, "font-size": 11, "font-weight": style.weight, "text-anchor": "middle", fill: "#1E293B" }, label);
+        makeEl(svg, "rect", { x: rangeX, y: cy + 14, width: rangeW, height: 19, rx: 9.5, fill: "#F8FAFC", stroke: "#E2E8F0", "stroke-width": 1 });
+        makeText(svg, { x: rangeX + rangeW / 2, y: cy + 28, "font-size": 10.5, "font-weight": 800, "text-anchor": "middle", fill: "#475569" }, range);
+        return;
+      }
+
+      makeEl(svg, "line", { x1: startX, y1: cy, x2: endX, y2: cy, stroke: style.color, "stroke-width": Number(style.width) + 8, "stroke-linecap": "round", opacity: .13 });
+      makeEl(svg, "line", { x1: startX, y1: cy, x2: endX, y2: cy, stroke: style.color, "stroke-width": style.width, "stroke-linecap": "round", "stroke-dasharray": dashArray(style) });
+      makeEl(svg, "circle", { cx: startX, cy, r: 6.2, fill: "#FFFFFF", stroke: style.color, "stroke-width": 3 });
+      makeEl(svg, "circle", { cx: endX, cy, r: 6.2, fill: "#FFFFFF", stroke: style.color, "stroke-width": 3 });
+
+      const mid = $("scaleMode").value === "log" ? Math.sqrt(start * end) : (start + end) / 2;
+      const midX = clamp(leftChart + x(mid), leftChart, leftChart + chartW);
+      const labelW = textWidth(label, 150, 340, 6.6);
+      const labelX = clamp(midX - labelW / 2, leftChart + 8, width - right - labelW);
+      const rangeX = clamp(midX - rangeW / 2, leftChart + 8, width - right - rangeW);
+
+      makeEl(svg, "rect", { x: labelX, y: cy - 33, width: labelW, height: 23, rx: 11.5, fill: "#FFFFFF", stroke: "#DDE6F1", "stroke-width": 1 });
+      makeText(svg, { x: labelX + labelW / 2, y: cy - 17, "font-size": 11, "font-weight": style.weight, "text-anchor": "middle", fill: "#1E293B" }, label);
+      makeEl(svg, "rect", { x: rangeX, y: cy + 14, width: rangeW, height: 19, rx: 9.5, fill: "#F8FAFC", stroke: "#E2E8F0", "stroke-width": 1 });
+      makeText(svg, { x: rangeX + rangeW / 2, y: cy + 28, "font-size": 10.5, "font-weight": 800, "text-anchor": "middle", fill: "#475569" }, range);
+
+      if ($("showTeleconverters").checked) {
+        if (lens.tc14) drawTc(svg, leftChart, chartW, x, endX, cy + 8, end * 1.4, max, "#94A3B8", "5 6", "1.4x");
+        if (lens.tc20) drawTc(svg, leftChart, chartW, x, endX, cy - 8, end * 2, max, "#CBD5E1", "3 5", "2x");
       }
     });
 
     y += blockH;
   });
 
-  makeEl(svg, "line", { x1: 14, y1: height - 74, x2: width - 14, y2: height - 74, stroke: "#111827", "stroke-width": 1.2 });
+  makeEl(svg, "line", { x1: 30, y1: plotBottom, x2: width - 30, y2: plotBottom, stroke: "#DCE5F0", "stroke-width": 1 });
 
-  let lx = 24;
-  const legendY = height - 34;
+  let lx = 44;
+  const legendY = height - 42;
+  makeText(svg, { x: lx, y: legendY + 5, "font-size": 12, "font-weight": 850, fill: "#64748B" }, "Styles");
+  lx += 70;
   state.styles.forEach(style => {
-    makeEl(svg, "line", { x1: lx, y1: legendY, x2: lx + 28, y2: legendY, stroke: style.color, "stroke-width": style.width, "stroke-linecap": "round", "stroke-dasharray": dashArray(style) });
-    makeText(svg, { x: lx + 38, y: legendY + 5, "font-size": 12, "font-weight": 650, fill: "#334155" }, style.name);
-    lx += Math.max(120, style.name.length * 8 + 74);
+    const pillW = Math.max(122, style.name.length * 7 + 66);
+    makeEl(svg, "rect", { x: lx, y: legendY - 16, width: pillW, height: 30, rx: 15, fill: "#F8FAFC", stroke: "#E2E8F0", "stroke-width": 1 });
+    makeEl(svg, "line", { x1: lx + 14, y1: legendY, x2: lx + 42, y2: legendY, stroke: style.color, "stroke-width": style.width, "stroke-linecap": "round", "stroke-dasharray": dashArray(style) });
+    makeText(svg, { x: lx + 52, y: legendY + 5, "font-size": 12, "font-weight": 700, fill: "#334155" }, style.name);
+    lx += pillW + 10;
   });
 }
 
-function drawTc(svg, leftChart, x, startX, y, tcEnd, max, color, dash) {
+function drawTc(svg, leftChart, chartW, x, startX, y, tcEnd, max, color, dash, label) {
   if (tcEnd > max) return;
-  const tcX = leftChart + x(tcEnd);
-  makeEl(svg, "line", { x1: startX, y1: y, x2: tcX, y2: y, stroke: color, "stroke-width": 3, "stroke-linecap": "round", "stroke-dasharray": dash });
-  makeEl(svg, "rect", { x: tcX - 4, y: y - 4, width: 8, height: 8, fill: color });
+  const tcX = clamp(leftChart + x(tcEnd), leftChart, leftChart + chartW);
+  makeEl(svg, "line", { x1: startX, y1: y, x2: tcX, y2: y, stroke: color, "stroke-width": 2.4, "stroke-linecap": "round", "stroke-dasharray": dash });
+  makeEl(svg, "rect", { x: tcX - 4, y: y - 4, width: 8, height: 8, rx: 2, fill: color });
+  makeText(svg, { x: tcX + 8, y: y + 4, "font-size": 10, "font-weight": 800, fill: "#64748B" }, label);
 }
 
 function renderMountSelect() {
   const select = $("lensMount");
   const current = select.value;
   select.innerHTML = "";
+
+  if (!state.mounts.length) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "마운트를 먼저 추가하세요";
+    select.appendChild(opt);
+    select.disabled = true;
+    return;
+  }
+
+  select.disabled = false;
   state.mounts.forEach(m => {
     const opt = document.createElement("option");
     opt.value = m.id;
-    opt.textContent = `${m.name} · crop ×${clean(m.crop)}`;
+    opt.textContent = `${m.name} · crop x${clean(m.crop)}`;
     select.appendChild(opt);
   });
   if (state.mounts.some(m => m.id === current)) select.value = current;
@@ -281,6 +372,17 @@ function renderStyleSelect() {
   const select = $("lensStyle");
   const current = select.value;
   select.innerHTML = "";
+
+  if (!state.styles.length) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "스타일을 먼저 추가하세요";
+    select.appendChild(opt);
+    select.disabled = true;
+    return;
+  }
+
+  select.disabled = false;
   state.styles.forEach(s => {
     const opt = document.createElement("option");
     opt.value = s.id;
@@ -293,6 +395,15 @@ function renderStyleSelect() {
 function renderMountSummary() {
   const box = $("mountSummary");
   box.innerHTML = "";
+
+  if (!state.mounts.length) {
+    const pill = document.createElement("span");
+    pill.className = "summary-pill";
+    pill.textContent = "마운트 없음";
+    box.appendChild(pill);
+    return;
+  }
+
   state.mounts.forEach(m => {
     const count = state.lenses.filter(l => l.mountId === m.id).length;
     const pill = document.createElement("span");
@@ -320,6 +431,16 @@ function stylePreview(style) {
   return svg;
 }
 
+function emptyRow(body, colspan, text) {
+  const row = document.createElement("tr");
+  const cell = document.createElement("td");
+  cell.colSpan = colspan;
+  cell.className = "empty-row";
+  cell.textContent = text;
+  row.appendChild(cell);
+  body.appendChild(row);
+}
+
 function renderTables() {
   const mountBody = $("mountTable");
   const styleBody = $("styleTable");
@@ -328,50 +449,62 @@ function renderTables() {
   styleBody.innerHTML = "";
   lensBody.innerHTML = "";
 
-  const mountTmpl = $("mountRowTemplate");
-  state.mounts.forEach(m => {
-    const row = mountTmpl.content.cloneNode(true);
-    row.querySelector(".mount-name").textContent = m.name;
-    row.querySelector(".mount-crop").textContent = `x${clean(m.crop)}`;
-    row.querySelector(".mount-count").textContent = `${state.lenses.filter(l => l.mountId === m.id).length}개`;
-    const swatch = document.createElement("div");
-    swatch.className = "color-swatch";
-    swatch.style.background = m.color;
-    row.querySelector(".mount-color").appendChild(swatch);
-    row.querySelector("button").addEventListener("click", () => deleteMount(m.id));
-    mountBody.appendChild(row);
-  });
-
-  const styleTmpl = $("styleRowTemplate");
-  state.styles.forEach(style => {
-    const row = styleTmpl.content.cloneNode(true);
-    row.querySelector(".style-name").textContent = style.name;
-    row.querySelector(".style-count").textContent = `${state.lenses.filter(l => l.styleId === style.id).length}개`;
-    row.querySelector(".style-preview-cell").appendChild(stylePreview(style));
-    row.querySelector(".style-dash").textContent = style.dash === "solid" ? "실선" : style.dash === "dash" ? "긴 점선" : "짧은 점선";
-    row.querySelector(".style-width").textContent = style.width;
-    row.querySelector("button").addEventListener("click", () => deleteStyle(style.id));
-    styleBody.appendChild(row);
-  });
-
-  const lensTmpl = $("lensRowTemplate");
-  state.lenses.forEach(lens => {
-    const mount = mountById(lens.mountId);
-    const style = styleById(lens.styleId);
-    const row = lensTmpl.content.cloneNode(true);
-    row.querySelector(".lens-name").textContent = lens.name;
-    row.querySelector(".lens-mount").textContent = mount ? mount.name : "Unknown";
-    row.querySelector(".lens-type").textContent = lens.type === "prime" ? "Prime" : "Zoom";
-    row.querySelector(".lens-actual").textContent = actualRange(lens);
-    row.querySelector(".lens-equiv").textContent = equivRange(lens);
-    row.querySelector(".lens-style").textContent = style.name;
-    row.querySelector("button").addEventListener("click", () => {
-      state.lenses = state.lenses.filter(x => x.id !== lens.id);
-      saveState();
-      renderAll();
+  if (!state.mounts.length) {
+    emptyRow(mountBody, 5, "마운트가 없습니다. 프리셋을 누르거나 새 마운트를 추가하세요.");
+  } else {
+    const mountTmpl = $("mountRowTemplate");
+    state.mounts.forEach(m => {
+      const row = mountTmpl.content.cloneNode(true);
+      row.querySelector(".mount-name").textContent = m.name;
+      row.querySelector(".mount-crop").textContent = `x${clean(m.crop)}`;
+      row.querySelector(".mount-count").textContent = `${state.lenses.filter(l => l.mountId === m.id).length}개`;
+      const swatch = document.createElement("div");
+      swatch.className = "color-swatch";
+      swatch.style.background = m.color;
+      row.querySelector(".mount-color").appendChild(swatch);
+      row.querySelector("button").addEventListener("click", () => deleteMount(m.id));
+      mountBody.appendChild(row);
     });
-    lensBody.appendChild(row);
-  });
+  }
+
+  if (!state.styles.length) {
+    emptyRow(styleBody, 6, "스타일이 없습니다. 기본 스타일이나 새 스타일을 추가하세요.");
+  } else {
+    const styleTmpl = $("styleRowTemplate");
+    state.styles.forEach(style => {
+      const row = styleTmpl.content.cloneNode(true);
+      row.querySelector(".style-name").textContent = style.name;
+      row.querySelector(".style-count").textContent = `${state.lenses.filter(l => l.styleId === style.id).length}개`;
+      row.querySelector(".style-preview-cell").appendChild(stylePreview(style));
+      row.querySelector(".style-dash").textContent = style.dash === "solid" ? "실선" : style.dash === "dash" ? "긴 점선" : "짧은 점선";
+      row.querySelector(".style-width").textContent = style.width;
+      row.querySelector("button").addEventListener("click", () => deleteStyle(style.id));
+      styleBody.appendChild(row);
+    });
+  }
+
+  if (!state.lenses.length) {
+    emptyRow(lensBody, 7, "아직 렌즈가 없습니다. 왼쪽의 렌즈 빠르게 추가 패널을 사용하세요.");
+  } else {
+    const lensTmpl = $("lensRowTemplate");
+    state.lenses.forEach(lens => {
+      const mount = mountById(lens.mountId);
+      const style = styleById(lens.styleId);
+      const row = lensTmpl.content.cloneNode(true);
+      row.querySelector(".lens-name").textContent = lens.name;
+      row.querySelector(".lens-mount").textContent = mount ? mount.name : "Unknown";
+      row.querySelector(".lens-type").textContent = lens.type === "prime" ? "Prime" : "Zoom";
+      row.querySelector(".lens-actual").textContent = actualRange(lens);
+      row.querySelector(".lens-equiv").textContent = equivRange(lens);
+      row.querySelector(".lens-style").textContent = style.name;
+      row.querySelector("button").addEventListener("click", () => {
+        state.lenses = state.lenses.filter(x => x.id !== lens.id);
+        saveState();
+        renderAll();
+      });
+      lensBody.appendChild(row);
+    });
+  }
 }
 
 function renderAll() {
@@ -380,6 +513,7 @@ function renderAll() {
   renderMountSummary();
   renderChart();
   renderTables();
+  updateLensPreview();
 }
 
 function slug(text) {
@@ -406,6 +540,7 @@ function addMount(name, crop, color, selectAfter = true) {
   if (existing) {
     if (selectAfter) $("lensMount").value = existing.id;
     toast(`${existing.name} 마운트를 선택했습니다.`);
+    updateLensPreview();
     return existing;
   }
 
@@ -414,6 +549,7 @@ function addMount(name, crop, color, selectAfter = true) {
   saveState();
   renderAll();
   if (selectAfter) $("lensMount").value = mount.id;
+  updateLensPreview();
   toast(`${mount.name} 마운트를 추가했습니다.`);
   return mount;
 }
@@ -429,6 +565,7 @@ function addStyle(name, color, dash = "solid", width = 5, weight = 800, selectAf
   if (existing) {
     if (selectAfter) $("lensStyle").value = existing.id;
     toast(`${existing.name} 스타일을 선택했습니다.`);
+    updateLensPreview();
     return existing;
   }
 
@@ -437,6 +574,7 @@ function addStyle(name, color, dash = "solid", width = 5, weight = 800, selectAf
   saveState();
   renderAll();
   if (selectAfter) $("lensStyle").value = style.id;
+  updateLensPreview();
   toast(`${style.name} 스타일을 추가했습니다.`);
   return style;
 }
@@ -464,6 +602,54 @@ function deleteStyle(id) {
   renderAll();
 }
 
+function applyParsedFocal(force = false) {
+  const parsed = parseFocalRange($("lensName").value);
+  if (!parsed) {
+    if (force) toast("렌즈 이름에서 mm 값을 찾지 못했습니다.");
+    return false;
+  }
+
+  if (force || !$("focalStart").value) $("focalStart").value = clean(parsed.start);
+  if (force || !$("focalEnd").value) $("focalEnd").value = clean(parsed.end);
+  if (force || !$("lensType").value) $("lensType").value = parsed.type;
+  if (force) toast(`${clean(parsed.start)}-${clean(parsed.end)}mm 값을 입력했습니다.`);
+  updateLensPreview();
+  return true;
+}
+
+function updateLensPreview() {
+  const preview = $("lensPreview");
+  if (!preview) return;
+
+  const addBtn = $("addLensBtn");
+  const canAddBase = state.mounts.length > 0 && state.styles.length > 0;
+  if (addBtn) addBtn.disabled = !canAddBase;
+
+  if (!state.mounts.length) {
+    preview.textContent = "먼저 마운트를 추가해 주세요. 프리셋을 누르면 바로 시작할 수 있습니다.";
+    return;
+  }
+  if (!state.styles.length) {
+    preview.textContent = "먼저 스타일을 추가해 주세요.";
+    return;
+  }
+
+  const start = Number($("focalStart").value);
+  const end = $("focalEnd").value ? Number($("focalEnd").value) : start;
+  if (!start || !end) {
+    preview.textContent = "렌즈 정보를 입력하면 실제/환산 화각이 여기에 표시됩니다.";
+    return;
+  }
+
+  const lens = {
+    mountId: $("lensMount").value,
+    start: Math.min(start, end),
+    end: Math.max(start, end)
+  };
+  const mount = mountById(lens.mountId);
+  preview.textContent = `${mount?.name || "선택된 마운트"} · 실제 ${actualRange(lens)} · 35mm 환산 ${equivRange(lens)} · 차트 라벨 ${labelRange(lens)}`;
+}
+
 function addLens() {
   if (!state.mounts.length) {
     alert("먼저 마운트를 만들어 주세요.");
@@ -474,19 +660,24 @@ function addLens() {
     return;
   }
 
-  const name = $("lensName").value.trim();
-  const start = Number($("focalStart").value);
-  const end = $("focalEnd").value ? Number($("focalEnd").value) : start;
+  applyParsedFocal(false);
 
-  if (!name || !start || !end) {
-    alert("렌즈 이름, 시작 mm, 끝 mm를 입력해 주세요. 단렌즈는 시작과 끝을 같게 넣으시면 됩니다.");
+  const name = $("lensName").value.trim();
+  const rawStart = Number($("focalStart").value);
+  const rawEnd = $("focalEnd").value ? Number($("focalEnd").value) : rawStart;
+
+  if (!name || !rawStart || !rawEnd) {
+    alert("렌즈 이름, 시작 mm, 끝 mm를 입력해 주세요.");
     return;
   }
+
+  const start = Math.min(rawStart, rawEnd);
+  const end = Math.max(rawStart, rawEnd);
 
   state.lenses.push({
     id: uid(),
     mountId: $("lensMount").value,
-    type: $("lensType").value,
+    type: start === end ? "prime" : $("lensType").value,
     styleId: $("lensStyle").value,
     name,
     start,
@@ -503,12 +694,41 @@ function addLens() {
 
   saveState();
   renderAll();
+  switchTab("Lenses");
+  toast("렌즈를 추가했습니다.");
+}
+
+function autoFitAxis() {
+  if (!state.lenses.length) {
+    toast("축에 맞출 렌즈가 없습니다.");
+    return;
+  }
+
+  const values = [];
+  state.lenses.forEach(lens => {
+    const start = displayValue(lens, Number(lens.start));
+    const end = displayValue(lens, Number(lens.end));
+    values.push(start, end);
+    if ($("showTeleconverters").checked && lens.tc14) values.push(end * 1.4);
+    if ($("showTeleconverters").checked && lens.tc20) values.push(end * 2);
+  });
+
+  const minValue = Math.max(1, Math.min(...values));
+  const maxValue = Math.max(...values);
+  const presets = [7, 8, 10, 12, 14, 16, 20, 24, 28, 35, 40, 50, 70, 85, 100, 135, 150, 200, 300, 400, 560, 600, 800, 1000, 1200, 1600, 2000, 2400, 3200];
+  const lower = [...presets].reverse().find(v => v <= minValue * .88) || Math.max(1, Math.floor(minValue * .8));
+  const upper = presets.find(v => v >= maxValue * 1.08) || Math.ceil(maxValue * 1.15);
+
+  $("axisMin").value = lower;
+  $("axisMax").value = upper;
+  renderChart();
+  toast("현재 렌즈 범위에 맞춰 축을 조정했습니다.");
 }
 
 function exportSvg() {
   const svg = $("chart").cloneNode(true);
   svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-  downloadBlob(`<?xml version="1.0" encoding="UTF-8"?>\\n${svg.outerHTML}`, "lens-roadmap.svg", "image/svg+xml;charset=utf-8");
+  downloadBlob(`<?xml version="1.0" encoding="UTF-8"?>\n${svg.outerHTML}`, "lens-roadmap.svg", "image/svg+xml;charset=utf-8");
 }
 
 function exportPng() {
@@ -547,10 +767,11 @@ function downloadBlob(content, filename, type) {
 
 function exportJson() {
   const data = {
-    version: 3,
+    version: 4,
     settings: {
       chartTitle: $("chartTitle").value,
       displayMode: $("displayMode").value,
+      labelMode: $("labelMode").value,
       scaleMode: $("scaleMode").value,
       axisMin: Number($("axisMin").value),
       axisMax: Number($("axisMax").value),
@@ -585,6 +806,7 @@ function importJson(file) {
       if (data.settings) {
         $("chartTitle").value = data.settings.chartTitle || $("chartTitle").value;
         $("displayMode").value = data.settings.displayMode || "equiv";
+        $("labelMode").value = data.settings.labelMode || "equiv";
         $("scaleMode").value = data.settings.scaleMode || "log";
         $("axisMin").value = data.settings.axisMin || 14;
         $("axisMax").value = data.settings.axisMax || 1600;
@@ -635,11 +857,27 @@ function bind() {
     });
   });
 
+  $("parseLensBtn").addEventListener("click", () => applyParsedFocal(true));
   $("addLensBtn").addEventListener("click", addLens);
+  $("autoFitAxisBtn").addEventListener("click", autoFitAxis);
   $("saveSvgBtn").addEventListener("click", exportSvg);
   $("savePngBtn").addEventListener("click", exportPng);
   $("exportJsonBtn").addEventListener("click", exportJson);
   $("importJsonInput").addEventListener("change", e => e.target.files[0] && importJson(e.target.files[0]));
+
+  $("lensName").addEventListener("input", () => {
+    applyParsedFocal(false);
+    updateLensPreview();
+  });
+  ["lensMount", "lensStyle", "lensType", "focalStart", "focalEnd", "tc14", "tc20"].forEach(id => {
+    $(id).addEventListener("input", updateLensPreview);
+    $(id).addEventListener("change", updateLensPreview);
+  });
+  ["lensName", "focalStart", "focalEnd"].forEach(id => {
+    $(id).addEventListener("keydown", e => {
+      if (e.key === "Enter") addLens();
+    });
+  });
 
   $("loadSampleBtn").addEventListener("click", () => {
     state = clone(defaultData);
@@ -655,9 +893,15 @@ function bind() {
     renderAll();
   });
 
-  ["displayMode", "scaleMode", "chartTitle", "axisMin", "axisMax", "showTeleconverters"].forEach(id => {
-    $(id).addEventListener("input", renderChart);
-    $(id).addEventListener("change", renderChart);
+  ["displayMode", "labelMode", "scaleMode", "chartTitle", "axisMin", "axisMax", "showTeleconverters"].forEach(id => {
+    $(id).addEventListener("input", () => {
+      renderChart();
+      updateLensPreview();
+    });
+    $(id).addEventListener("change", () => {
+      renderChart();
+      updateLensPreview();
+    });
   });
 
   $("tabMounts").addEventListener("click", () => switchTab("Mounts"));
