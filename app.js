@@ -291,8 +291,8 @@ function renderChart() {
   const plotTop = 78;
   const leftType = 124;
   const leftChart = 176;
-  const right = 24;
-  const width = 1280;
+  const right = 64;
+  const width = 1320;
   const footerH = 34;
   const crop = referenceCrop();
 
@@ -374,7 +374,7 @@ function renderChart() {
     makeEl(svg, "rect", { x: plotLeft, y, width: plotRight - plotLeft, height: blockH, fill: "#FFFFFF", stroke: "#4B4B4B", "stroke-width": 1.4 });
     makeText(svg, { x: labelColumnX, y: y + blockH / 2 + 6, "font-size": 19, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, categoryLabel(type));
 
-    items.forEach((lens, idx) => {
+    const plottedItems = items.map((lens, idx) => {
       const style = styleById(lens.styleId);
       const start = Math.min(displayValue(lens, Number(lens.start)), displayValue(lens, Number(lens.end)));
       const end = Math.max(displayValue(lens, Number(lens.start)), displayValue(lens, Number(lens.end)));
@@ -382,9 +382,20 @@ function renderChart() {
       const endX = clamp(leftChart + x(end), leftChart, leftChart + chartW);
       const label = shortText(chartLensName(lens.name), isZoom ? 46 : 24);
       const color = style.name.toLowerCase().includes("standard") ? "#9A9A9A" : "#1F1F1F";
+      const cy = isZoom ? y + 33 + idx * rowH : y + 31 + idx * primeRowH;
+      return { lens, idx, style, start, end, startX, endX, label, color, cy };
+    });
 
+    if (isZoom && $("showZoomGuides")?.checked) {
+      plottedItems.forEach(item => {
+        drawZoomGuide(svg, item.startX, y + 1, item.cy - 8);
+        drawZoomGuide(svg, item.endX, y + 1, item.cy - 8);
+      });
+    }
+
+    plottedItems.forEach(item => {
+      const { lens, style, startX, endX, label, color, cy, end } = item;
       if (!isZoom) {
-        const cy = y + 31 + idx * primeRowH;
         const labelW = textWidth(label, 82, 190, 6.1);
         const labelRightX = startX + 12;
         const labelFitsRight = labelRightX + labelW < plotRight - 8;
@@ -395,10 +406,12 @@ function renderChart() {
         return;
       }
 
-      const cy = y + 33 + idx * rowH;
       makeEl(svg, "rect", { x: startX - 6, y: cy - 5, width: 8, height: 10, fill: color });
       makeEl(svg, "line", { x1: startX, y1: cy, x2: endX, y2: cy, stroke: color, "stroke-width": Number(style.width) + 1, "stroke-linecap": "butt", "stroke-dasharray": dashArray(style) });
-      makeText(svg, { x: clamp(startX + 9, leftChart + 7, width - right - 230), y: cy + 20, "font-size": 11.5, "font-weight": style.weight, fill: "#111111" }, label);
+      const labelW = textWidth(label, 104, 250, 6.1);
+      const labelX = clamp(startX + 9, leftChart + 7, plotRight - labelW - 5);
+      makeEl(svg, "rect", { x: labelX - 3, y: cy + 8, width: labelW, height: 16, fill: "#FFFFFF" });
+      makeText(svg, { x: labelX, y: cy + 20, "font-size": 11.5, "font-weight": style.weight, fill: "#111111" }, label);
 
       if ($("showTeleconverters").checked) {
         if (lens.tc14) drawTc(svg, leftChart, chartW, x, endX, cy - 8, end * 1.4, max, "#B9A37C", "", "");
@@ -433,6 +446,11 @@ function drawTc(svg, leftChart, chartW, x, startX, y, tcEnd, max, color, dash, l
   const tcX = clamp(leftChart + x(tcEnd), leftChart, leftChart + chartW);
   makeEl(svg, "line", { x1: startX, y1: y, x2: tcX, y2: y, stroke: color, "stroke-width": 4, "stroke-linecap": "butt", "stroke-dasharray": dash });
   if (label) makeText(svg, { x: tcX + 8, y: y + 4, "font-size": 10, "font-weight": 800, fill: "#64748B" }, label);
+}
+
+function drawZoomGuide(svg, x, y1, y2) {
+  if (y2 <= y1 + 4) return;
+  makeEl(svg, "line", { x1: x, y1, x2: x, y2, stroke: "#8EA2B8", "stroke-width": 1.1, "stroke-dasharray": "3 5", opacity: .72 });
 }
 
 function renderMountSelect() {
@@ -899,7 +917,8 @@ function exportJson() {
       scaleMode: $("scaleMode").value,
       axisMin: Number($("axisMin").value),
       axisMax: Number($("axisMax").value),
-      showTeleconverters: $("showTeleconverters").checked
+      showTeleconverters: $("showTeleconverters").checked,
+      showZoomGuides: $("showZoomGuides").checked
     },
     ...state
   };
@@ -935,6 +954,7 @@ function importJson(file) {
         $("axisMin").value = data.settings.axisMin || 14;
         $("axisMax").value = data.settings.axisMax || 1600;
         $("showTeleconverters").checked = data.settings.showTeleconverters ?? true;
+        $("showZoomGuides").checked = data.settings.showZoomGuides ?? true;
       }
       saveState();
       renderAll();
@@ -1204,7 +1224,7 @@ function bind() {
     renderAll();
   });
 
-  ["displayMode", "labelMode", "scaleMode", "chartTitle", "axisMin", "axisMax", "showTeleconverters"].forEach(id => {
+  ["displayMode", "labelMode", "scaleMode", "chartTitle", "axisMin", "axisMax", "showTeleconverters", "showZoomGuides"].forEach(id => {
     $(id).addEventListener("input", () => {
       renderChart();
       updateLensPreview();
