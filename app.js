@@ -162,9 +162,9 @@ function axisModeText() {
 
 function labelModeText() {
   const mode = $("labelMode")?.value || "equiv";
-  if (mode === "actual") return "실제 초점거리";
-  if (mode === "both") return "실제 + 35mm 환산";
-  return "35mm 환산";
+  if (mode === "actual") return "초점거리만";
+  if (mode === "both") return "초점거리 + 35mm 환산";
+  return "35mm 환산만";
 }
 
 function labelRange(lens) {
@@ -208,7 +208,7 @@ function scaleFactory(min, max, width) {
 }
 
 function ticksFor(min, max) {
-  const base = [7, 8, 10, 12, 14, 16, 18, 20, 24, 28, 35, 40, 50, 70, 85, 100, 135, 150, 200, 300, 400, 560, 600, 800, 1000, 1200, 1600, 2000, 2400];
+  const base = [7, 12, 20, 40, 75, 100, 150, 300, 400, 800, 1000, 1200, 1600, 2000, 2400, 3200];
   return base.filter(v => v >= min && v <= max);
 }
 
@@ -227,18 +227,60 @@ function makeText(svg, attrs, content) {
   return node;
 }
 
+function lensCategory(lens) {
+  if (/macro/i.test(lens.name)) return "macro";
+  if (lens.type === "prime" || Number(lens.start) === Number(lens.end)) return "prime";
+  return "zoom";
+}
+
+function categoryLabel(type) {
+  if (type === "macro") return "Macro";
+  if (type === "prime") return "Prime";
+  return "Zoom";
+}
+
+function chartLensName(name) {
+  return String(name || "")
+    .replace(/^M\.?\s*Zuiko\s+Digital\s+/i, "")
+    .replace(/^LEICA\s+DG\s+/i, "")
+    .replace(/^Zuiko\s+Digital\s+/i, "")
+    .replace(/^OM-System\s+Zuiko\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function chartRows() {
   const rows = [];
   state.mounts.forEach(mount => {
     const mountLenses = state.lenses.filter(l => l.mountId === mount.id);
     if (!mountLenses.length) return;
     rows.push({ kind: "mountHeader", mount });
-    ["prime", "zoom"].forEach(type => {
-      const items = mountLenses.filter(l => l.type === type);
+    ["prime", "macro", "zoom"].forEach(type => {
+      const items = mountLenses.filter(l => lensCategory(l) === type);
       if (items.length) rows.push({ kind: "lensGroup", mount, type, items });
     });
   });
   return rows;
+}
+
+function referenceCrop(rows) {
+  const mountRow = rows.find(row => row.kind === "mountHeader");
+  return mountRow ? Number(mountRow.mount.crop) || 1 : 1;
+}
+
+function axisPair(value, crop) {
+  if ($("displayMode").value === "equiv") {
+    return { actual: value / crop, equiv: value };
+  }
+  return { actual: value, equiv: value * crop };
+}
+
+function drawLensIcon(svg, x, y, color, variant = "dark") {
+  const body = variant === "light" ? "#4B5563" : "#111827";
+  makeEl(svg, "rect", { x: x - 13, y: y - 6, width: 22, height: 12, rx: 3, fill: body, stroke: "#0F172A", "stroke-width": .7 });
+  makeEl(svg, "rect", { x: x - 6, y: y - 8, width: 11, height: 16, rx: 3, fill: "#1F2937", stroke: "#0F172A", "stroke-width": .7 });
+  makeEl(svg, "ellipse", { cx: x + 9, cy: y, rx: 5, ry: 8, fill: color, opacity: .92, stroke: "#0F172A", "stroke-width": .7 });
+  makeEl(svg, "ellipse", { cx: x + 9, cy: y, rx: 2.6, ry: 5, fill: "#E5E7EB", opacity: .42 });
 }
 
 function renderChart() {
@@ -252,149 +294,157 @@ function renderChart() {
     svg.parentElement.hidden = rows.length === 0;
   }
 
-  const rowH = 62;
-  const groupHeaderH = 48;
-  const top = 132;
-  const leftType = 168;
-  const leftChart = 326;
-  const right = 58;
-  const width = 1580;
-  const footerH = 78;
+  const rowH = 42;
+  const groupHeaderH = 30;
+  const axisTop = 42;
+  const plotTop = 104;
+  const leftType = 140;
+  const leftChart = 220;
+  const right = 42;
+  const width = 1520;
+  const footerH = 58;
+  const crop = referenceCrop(rows);
 
   let contentH = 0;
-  rows.forEach(r => contentH += r.kind === "mountHeader" ? groupHeaderH : Math.max(96, r.items.length * rowH + 34));
+  rows.forEach(row => {
+    if (row.kind === "mountHeader") {
+      contentH += groupHeaderH;
+      return;
+    }
+    if (row.type === "zoom") contentH += Math.max(160, row.items.length * rowH + 40);
+    else contentH += Math.max(230, Math.ceil(row.items.length / 4) * 132 + 28);
+  });
 
-  const height = Math.max(740, top + contentH + footerH);
+  const height = Math.max(720, plotTop + contentH + footerH);
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
   svg.setAttribute("width", width);
   svg.setAttribute("height", height);
 
-  makeEl(svg, "rect", { x: 0, y: 0, width, height, fill: "#F7FAFC" });
-  makeEl(svg, "rect", { x: 18, y: 18, width: width - 36, height: height - 36, rx: 26, fill: "#FFFFFF", stroke: "#D9E2EE", "stroke-width": 1.2 });
-  makeEl(svg, "rect", { x: 18, y: 18, width: width - 36, height: 80, rx: 26, fill: "#F2F7FF" });
-  makeEl(svg, "rect", { x: 18, y: 72, width: width - 36, height: 26, fill: "#F2F7FF" });
+  makeEl(svg, "rect", { x: 0, y: 0, width, height, fill: "#FFFFFF" });
 
   const title = $("chartTitle").value.trim() || "Lens Roadmap";
   const modeText = axisModeText();
   const scaleText = $("scaleMode").value === "log" ? "로그 스케일" : "선형 스케일";
 
   $("liveTitle").textContent = title;
-  $("liveDesc").textContent = `${modeText} · 라벨 ${labelModeText()} · ${scaleText}`;
-
-  makeText(svg, { x: 44, y: 52, "font-size": 28, "font-weight": 850, fill: "#111827" }, title);
-  makeText(svg, { x: 44, y: 78, "font-size": 13, "font-weight": 700, fill: "#475569" }, `${modeText} · 라벨 ${labelModeText()} · ${scaleText}`);
+  $("liveDesc").textContent = `${modeText} · 상단 축 ${labelModeText()} · ${scaleText}`;
 
   const min = Math.max(0.1, Number($("axisMin").value) || 10);
   const max = Math.max(min + 1, Number($("axisMax").value) || 1600);
   const chartW = width - leftChart - right;
   const x = scaleFactory(min, max, chartW);
   const ticks = ticksFor(min, max);
-  const plotBottom = height - footerH;
+  const plotBottom = height - footerH - 8;
+  const plotLeft = 30;
+  const plotRight = width - right;
+  const labelMode = $("labelMode")?.value || "both";
+  const tickData = ticks.map(t => ({ t, px: leftChart + x(t) }));
+  const labelGap = labelMode === "both" ? 64 : 58;
+  const labeledTicks = [];
+  tickData.forEach((item, index) => {
+    const last = labeledTicks[labeledTicks.length - 1];
+    const isLast = index === tickData.length - 1;
+    if (!last || item.px - last.px >= labelGap) {
+      labeledTicks.push(item);
+      return;
+    }
+    if (isLast) {
+      labeledTicks.pop();
+      labeledTicks.push(item);
+    }
+  });
+  const labelTickSet = new Set(labeledTicks.map(item => item.t));
 
-  makeEl(svg, "rect", { x: 30, y: top - 44, width: width - 60, height: plotBottom - top + 44, rx: 18, fill: "#FBFCFE", stroke: "#DCE5F0", "stroke-width": 1 });
-  makeEl(svg, "line", { x1: leftType, y1: top - 44, x2: leftType, y2: plotBottom, stroke: "#DCE5F0", "stroke-width": 1 });
-  makeEl(svg, "line", { x1: leftChart - 18, y1: top - 44, x2: leftChart - 18, y2: plotBottom, stroke: "#DCE5F0", "stroke-width": 1 });
+  makeText(svg, { x: 76, y: axisTop + 5, "font-size": 14, "font-weight": 800, "text-anchor": "middle", fill: "#111827" }, labelMode === "equiv" ? "35mm equivalent" : "focal length");
+  if (labelMode === "both") {
+    makeText(svg, { x: 76, y: axisTop + 29, "font-size": 12, "font-weight": 700, "text-anchor": "middle", fill: "#111827" }, "(35mm equivalent)");
+  }
 
   ticks.forEach(t => {
     const px = leftChart + x(t);
-    makeEl(svg, "line", { x1: px, y1: top - 44, x2: px, y2: plotBottom, stroke: "#E4EBF4", "stroke-width": 1, "stroke-dasharray": "4 8" });
-    makeEl(svg, "rect", { x: px - 23, y: top - 72, width: 46, height: 22, rx: 11, fill: "#FFFFFF", stroke: "#DCE5F0", "stroke-width": 1 });
-    makeText(svg, { x: px, y: top - 57, "font-size": 11, "font-weight": 850, "text-anchor": "middle", fill: "#334155" }, `${clean(t)}mm`);
+    const pair = axisPair(t, crop);
+    makeEl(svg, "line", { x1: px, y1: plotTop, x2: px, y2: plotBottom, stroke: "#BEBEBE", "stroke-width": 1.2, "stroke-dasharray": "5 7" });
+    if (!labelTickSet.has(t)) return;
+    if (labelMode === "both") {
+      makeText(svg, { x: px, y: axisTop, "font-size": 18, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, `${clean(pair.actual)}mm`);
+      makeText(svg, { x: px, y: axisTop + 24, "font-size": 13, "font-weight": 750, "text-anchor": "middle", fill: "#111111" }, `${clean(pair.equiv)}mm`);
+    } else if (labelMode === "equiv") {
+      makeText(svg, { x: px, y: axisTop + 10, "font-size": 18, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, `${clean(pair.equiv)}mm`);
+    } else {
+      makeText(svg, { x: px, y: axisTop + 10, "font-size": 18, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, `${clean(pair.actual)}mm`);
+    }
   });
 
-  makeText(svg, { x: leftChart - 22, y: top - 57, "font-size": 12, "font-weight": 850, "text-anchor": "end", fill: "#475569" }, "초점거리");
+  makeEl(svg, "rect", { x: plotLeft, y: plotTop, width: plotRight - plotLeft, height: plotBottom - plotTop, fill: "none", stroke: "#4B4B4B", "stroke-width": 2 });
+  makeEl(svg, "line", { x1: leftType, y1: plotTop, x2: leftType, y2: plotBottom, stroke: "#4B4B4B", "stroke-width": 2 });
 
-  let y = top;
-  rows.forEach((row, rowIndex) => {
+  let y = plotTop;
+  rows.forEach(row => {
     if (row.kind === "mountHeader") {
       const m = row.mount;
       const count = state.lenses.filter(l => l.mountId === m.id).length;
-      makeEl(svg, "rect", { x: 30, y, width: width - 60, height: groupHeaderH, fill: "#F8FBFF", stroke: "#E5ECF5", "stroke-width": 1 });
-      makeEl(svg, "rect", { x: 30, y, width: 7, height: groupHeaderH, fill: m.color });
-      makeEl(svg, "circle", { cx: 56, cy: y + 24, r: 7, fill: m.color });
-      makeText(svg, { x: 72, y: y + 29, "font-size": 16, "font-weight": 850, fill: "#111827" }, `${m.name} · crop x${clean(m.crop)} · ${count} lenses`);
+      makeEl(svg, "rect", { x: plotLeft, y, width: plotRight - plotLeft, height: groupHeaderH, fill: "#FAFAFA", stroke: "#DADADA", "stroke-width": 1 });
+      makeText(svg, { x: leftType + 12, y: y + 20, "font-size": 13, "font-weight": 800, fill: "#111111" }, `${m.name} · crop x${clean(m.crop)} · ${count} lenses`);
       y += groupHeaderH;
       return;
     }
 
     const { type, items } = row;
-    const blockH = Math.max(96, items.length * rowH + 34);
-    const fill = rowIndex % 2 ? "#FFFFFF" : "#FCFDFF";
-    makeEl(svg, "rect", { x: 30, y, width: width - 60, height: blockH, fill, stroke: "#E7EDF5", "stroke-width": 1 });
-    makeEl(svg, "rect", { x: 58, y: y + blockH / 2 - 17, width: 84, height: 34, rx: 17, fill: type === "prime" ? "#EEF6FF" : "#F2F8F4", stroke: type === "prime" ? "#BFDBFE" : "#BBE4C6", "stroke-width": 1 });
-    makeText(svg, { x: 100, y: y + blockH / 2 + 6, "font-size": 13, "font-weight": 900, "text-anchor": "middle", fill: type === "prime" ? "#1D4ED8" : "#15803D" }, type === "prime" ? "Prime" : "Zoom");
+    const isZoom = type === "zoom";
+    const blockH = isZoom ? Math.max(160, items.length * rowH + 40) : Math.max(230, Math.ceil(items.length / 4) * 132 + 28);
+    makeEl(svg, "rect", { x: plotLeft, y, width: plotRight - plotLeft, height: blockH, fill: "#FFFFFF", stroke: "#4B4B4B", "stroke-width": 1.4 });
+    makeText(svg, { x: 76, y: y + blockH / 2 + 8, "font-size": 22, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, categoryLabel(type));
 
     items.forEach((lens, idx) => {
-      const cy = y + 42 + idx * rowH;
       const style = styleById(lens.styleId);
       const start = Math.min(displayValue(lens, Number(lens.start)), displayValue(lens, Number(lens.end)));
       const end = Math.max(displayValue(lens, Number(lens.start)), displayValue(lens, Number(lens.end)));
       const startX = clamp(leftChart + x(start), leftChart, leftChart + chartW);
       const endX = clamp(leftChart + x(end), leftChart, leftChart + chartW);
-      const label = shortText(lens.name, 46);
-      const range = labelRange(lens);
-      const rangeW = textWidth(range, 92, 230, 6.6);
+      const label = shortText(chartLensName(lens.name), isZoom ? 46 : 24);
+      const color = style.name.toLowerCase().includes("standard") ? "#9A9A9A" : "#1F1F1F";
 
-      if (type === "prime" || start === end) {
-        makeEl(svg, "line", { x1: startX, y1: cy + 12, x2: startX, y2: cy - 14, stroke: style.color, "stroke-width": 2, opacity: .35 });
-        makeEl(svg, "circle", { cx: startX, cy, r: Math.max(6, Number(style.width) + 1.8), fill: "#FFFFFF", stroke: style.color, "stroke-width": 3 });
-
-        const labelW = textWidth(label, 150, 320, 6.6);
-        const labelX = clamp(startX - labelW / 2, leftChart + 8, width - right - labelW);
-        const rangeX = clamp(startX - rangeW / 2, leftChart + 8, width - right - rangeW);
-        makeEl(svg, "rect", { x: labelX, y: cy - 33, width: labelW, height: 23, rx: 11.5, fill: "#FFFFFF", stroke: "#DDE6F1", "stroke-width": 1 });
-        makeText(svg, { x: labelX + labelW / 2, y: cy - 17, "font-size": 11, "font-weight": style.weight, "text-anchor": "middle", fill: "#1E293B" }, label);
-        makeEl(svg, "rect", { x: rangeX, y: cy + 14, width: rangeW, height: 19, rx: 9.5, fill: "#F8FAFC", stroke: "#E2E8F0", "stroke-width": 1 });
-        makeText(svg, { x: rangeX + rangeW / 2, y: cy + 28, "font-size": 10.5, "font-weight": 800, "text-anchor": "middle", fill: "#475569" }, range);
+      if (!isZoom) {
+        const lane = idx % 4;
+        const row = Math.floor(idx / 4);
+        const cy = y + 58 + row * 132 + lane * 32;
+        makeEl(svg, "rect", { x: startX - 5, y: cy - 45, width: 10, height: 10, fill: color });
+        drawLensIcon(svg, startX, cy - 12, color, style.name.toLowerCase().includes("standard") ? "light" : "dark");
+        makeText(svg, { x: startX, y: cy + 13, "font-size": 12.5, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, label);
         return;
       }
 
-      makeEl(svg, "line", { x1: startX, y1: cy, x2: endX, y2: cy, stroke: style.color, "stroke-width": Number(style.width) + 8, "stroke-linecap": "round", opacity: .13 });
-      makeEl(svg, "line", { x1: startX, y1: cy, x2: endX, y2: cy, stroke: style.color, "stroke-width": style.width, "stroke-linecap": "round", "stroke-dasharray": dashArray(style) });
-      makeEl(svg, "circle", { cx: startX, cy, r: 6.2, fill: "#FFFFFF", stroke: style.color, "stroke-width": 3 });
-      makeEl(svg, "circle", { cx: endX, cy, r: 6.2, fill: "#FFFFFF", stroke: style.color, "stroke-width": 3 });
-
-      const mid = $("scaleMode").value === "log" ? Math.sqrt(start * end) : (start + end) / 2;
-      const midX = clamp(leftChart + x(mid), leftChart, leftChart + chartW);
-      const labelW = textWidth(label, 150, 340, 6.6);
-      const labelX = clamp(midX - labelW / 2, leftChart + 8, width - right - labelW);
-      const rangeX = clamp(midX - rangeW / 2, leftChart + 8, width - right - rangeW);
-
-      makeEl(svg, "rect", { x: labelX, y: cy - 33, width: labelW, height: 23, rx: 11.5, fill: "#FFFFFF", stroke: "#DDE6F1", "stroke-width": 1 });
-      makeText(svg, { x: labelX + labelW / 2, y: cy - 17, "font-size": 11, "font-weight": style.weight, "text-anchor": "middle", fill: "#1E293B" }, label);
-      makeEl(svg, "rect", { x: rangeX, y: cy + 14, width: rangeW, height: 19, rx: 9.5, fill: "#F8FAFC", stroke: "#E2E8F0", "stroke-width": 1 });
-      makeText(svg, { x: rangeX + rangeW / 2, y: cy + 28, "font-size": 10.5, "font-weight": 800, "text-anchor": "middle", fill: "#475569" }, range);
+      const cy = y + 42 + idx * rowH;
+      drawLensIcon(svg, startX - 26, cy - 7, color, color === "#9A9A9A" ? "light" : "dark");
+      makeEl(svg, "line", { x1: startX, y1: cy, x2: endX, y2: cy, stroke: color, "stroke-width": Number(style.width) + 1, "stroke-linecap": "butt", "stroke-dasharray": dashArray(style) });
+      makeText(svg, { x: clamp(startX + 10, leftChart + 8, width - right - 260), y: cy + 18, "font-size": 14, "font-weight": style.weight, fill: "#111111" }, label);
 
       if ($("showTeleconverters").checked) {
-        if (lens.tc14) drawTc(svg, leftChart, chartW, x, endX, cy + 8, end * 1.4, max, "#94A3B8", "5 6", "1.4x");
-        if (lens.tc20) drawTc(svg, leftChart, chartW, x, endX, cy - 8, end * 2, max, "#CBD5E1", "3 5", "2x");
+        if (lens.tc14) drawTc(svg, leftChart, chartW, x, endX, cy, end * 1.4, max, "#C9C9C9", "", "");
+        if (lens.tc20) drawTc(svg, leftChart, chartW, x, endX, cy, end * 2, max, "#C9C9C9", "", "");
       }
     });
 
     y += blockH;
   });
 
-  makeEl(svg, "line", { x1: 30, y1: plotBottom, x2: width - 30, y2: plotBottom, stroke: "#DCE5F0", "stroke-width": 1 });
+  makeText(svg, { x: plotLeft + 4, y: height - 34, "font-size": 13, "font-weight": 800, fill: "#111111" }, "As of current data");
 
-  let lx = 44;
-  const legendY = height - 42;
-  makeText(svg, { x: lx, y: legendY + 5, "font-size": 12, "font-weight": 850, fill: "#64748B" }, "Styles");
-  lx += 70;
+  let lx = width - 360;
+  const legendY = height - 30;
   state.styles.forEach(style => {
-    const pillW = Math.max(122, style.name.length * 7 + 66);
-    makeEl(svg, "rect", { x: lx, y: legendY - 16, width: pillW, height: 30, rx: 15, fill: "#F8FAFC", stroke: "#E2E8F0", "stroke-width": 1 });
-    makeEl(svg, "line", { x1: lx + 14, y1: legendY, x2: lx + 42, y2: legendY, stroke: style.color, "stroke-width": style.width, "stroke-linecap": "round", "stroke-dasharray": dashArray(style) });
-    makeText(svg, { x: lx + 52, y: legendY + 5, "font-size": 12, "font-weight": 700, fill: "#334155" }, style.name);
-    lx += pillW + 10;
+    const color = style.name.toLowerCase().includes("standard") ? "#9A9A9A" : "#1F1F1F";
+    makeEl(svg, "rect", { x: lx, y: legendY - 10, width: 11, height: 11, fill: color });
+    makeText(svg, { x: lx + 18, y: legendY, "font-size": 15, "font-weight": 850, fill: "#111111", "font-style": "italic" }, style.name);
+    lx += Math.max(100, style.name.length * 9 + 44);
   });
 }
 
 function drawTc(svg, leftChart, chartW, x, startX, y, tcEnd, max, color, dash, label) {
   if (tcEnd > max) return;
   const tcX = clamp(leftChart + x(tcEnd), leftChart, leftChart + chartW);
-  makeEl(svg, "line", { x1: startX, y1: y, x2: tcX, y2: y, stroke: color, "stroke-width": 2.4, "stroke-linecap": "round", "stroke-dasharray": dash });
-  makeEl(svg, "rect", { x: tcX - 4, y: y - 4, width: 8, height: 8, rx: 2, fill: color });
-  makeText(svg, { x: tcX + 8, y: y + 4, "font-size": 10, "font-weight": 800, fill: "#64748B" }, label);
+  makeEl(svg, "line", { x1: startX, y1: y, x2: tcX, y2: y, stroke: color, "stroke-width": 5, "stroke-linecap": "butt", "stroke-dasharray": dash });
+  if (label) makeText(svg, { x: tcX + 8, y: y + 4, "font-size": 10, "font-weight": 800, fill: "#64748B" }, label);
 }
 
 function renderMountSelect() {
@@ -700,7 +750,7 @@ function updateLensPreview() {
     end: Math.max(start, end)
   };
   const mount = mountById(lens.mountId);
-  preview.textContent = `${mount?.name || "선택된 마운트"} · 실제 ${actualRange(lens)} · 35mm 환산 ${equivRange(lens)} · 차트 라벨 ${labelRange(lens)}`;
+  preview.textContent = `${mount?.name || "선택된 마운트"} · 실제 ${actualRange(lens)} · 35mm 환산 ${equivRange(lens)} · 환산값은 상단 축에서 표시됩니다.`;
 }
 
 function addLens() {

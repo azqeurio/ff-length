@@ -91,15 +91,15 @@
           <div class="two-col">
             <label class="field"><span>차트 축 기준</span>
               <select id="displayMode">
-                <option value="equiv" selected>35mm 환산 기준</option>
-                <option value="actual">실제 초점거리 기준</option>
+                <option value="actual" selected>실제 초점거리 기준</option>
+                <option value="equiv">35mm 환산 기준</option>
               </select>
             </label>
-            <label class="field"><span>렌즈 라벨 표기</span>
+            <label class="field"><span>상단 축 표기</span>
               <select id="labelMode">
-                <option value="equiv" selected>35mm 환산만</option>
-                <option value="actual">실제 초점거리만</option>
-                <option value="both">둘 다 표시</option>
+                <option value="both" selected>초점거리 + 35mm 환산</option>
+                <option value="actual">초점거리만</option>
+                <option value="equiv">35mm 환산만</option>
               </select>
             </label>
           </div>
@@ -117,8 +117,8 @@
           </div>
 
           <div class="two-col">
-            <label class="field"><span>축 최소값</span><input id="axisMin" type="number" value="14" min="1" step="1" /></label>
-            <label class="field"><span>축 최대값</span><input id="axisMax" type="number" value="1600" min="10" step="10" /></label>
+            <label class="field"><span>축 최소값</span><input id="axisMin" type="number" value="7" min="1" step="1" /></label>
+            <label class="field"><span>축 최대값</span><input id="axisMax" type="number" value="1200" min="10" step="10" /></label>
           </div>
 
           <div class="toggle-row">
