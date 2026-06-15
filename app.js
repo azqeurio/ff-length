@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+const uid = () => (globalThis.crypto?.randomUUID ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
 const defaultData = {
   mounts: [
@@ -40,10 +40,10 @@ function clone(obj) { return JSON.parse(JSON.stringify(obj)); }
 function loadState() {
   try {
     const saved = JSON.parse(localStorage.getItem("lensRoadmapStudioV3"));
-    if (saved?.mounts && saved?.styles && saved?.lenses) return saved;
+    if (saved?.mounts && saved?.styles && saved?.lenses) return normalizeState(saved);
 
     const old = JSON.parse(localStorage.getItem("lensRoadmapStudioV2"));
-    if (old?.mounts && old?.lenses) return migrateV2(old);
+    if (old?.mounts && old?.lenses) return normalizeState(migrateV2(old));
   } catch {}
   return clone(defaultData);
 }
@@ -64,6 +64,59 @@ function migrateV2(old) {
       tc20: !!l.tc20
     }))
   };
+}
+
+function normalizeState(data) {
+  const mounts = Array.isArray(data.mounts) ? data.mounts
+    .map(m => ({
+      id: String(m.id || uid()),
+      name: String(m.name || "Untitled Mount").trim(),
+      crop: Math.max(0.1, Number(m.crop) || 1),
+      color: m.color || "#64748B"
+    }))
+    .filter(m => m.name) : [];
+
+  const styles = Array.isArray(data.styles) ? data.styles
+    .map(s => ({
+      id: String(s.id || uid()),
+      name: String(s.name || "Default").trim(),
+      color: s.color || "#667085",
+      dash: ["solid", "dash", "dot"].includes(s.dash) ? s.dash : "solid",
+      width: Math.min(10, Math.max(2, Number(s.width) || 5)),
+      weight: Number(s.weight) || 800
+    }))
+    .filter(s => s.name) : [];
+
+  const mountIds = new Set(mounts.map(m => m.id));
+  const styleIds = new Set(styles.map(s => s.id));
+  const fallbackMount = mounts[0]?.id;
+  const fallbackStyle = styles[0]?.id;
+
+  const lenses = Array.isArray(data.lenses) ? data.lenses
+    .map(l => {
+      const rawStart = Number(l.start);
+      const rawEnd = Number(l.end || l.start);
+      if (!rawStart || !rawEnd) return null;
+      const mountId = mountIds.has(l.mountId) ? l.mountId : fallbackMount;
+      const styleId = styleIds.has(l.styleId) ? l.styleId : fallbackStyle;
+      if (!mountId || !styleId) return null;
+      const start = Math.min(rawStart, rawEnd);
+      const end = Math.max(rawStart, rawEnd);
+      return {
+        id: l.id || uid(),
+        mountId,
+        type: start === end ? "prime" : (l.type === "prime" ? "prime" : "zoom"),
+        styleId,
+        name: String(l.name || "Untitled Lens").trim(),
+        start,
+        end,
+        tc14: !!l.tc14,
+        tc20: !!l.tc20
+      };
+    })
+    .filter(Boolean) : [];
+
+  return { mounts, styles, lenses };
 }
 
 function saveState() { localStorage.setItem("lensRoadmapStudioV3", JSON.stringify(state)); }
@@ -725,35 +778,67 @@ function autoFitAxis() {
   toast("현재 렌즈 범위에 맞춰 축을 조정했습니다.");
 }
 
-function exportSvg() {
-  const svg = $("chart").cloneNode(true);
-  svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-  downloadBlob(`<?xml version="1.0" encoding="UTF-8"?>\n${svg.outerHTML}`, "lens-roadmap.svg", "image/svg+xml;charset=utf-8");
-}
-
-function exportPng() {
+function chartSvgBlobUrl() {
   const source = $("chart").cloneNode(true);
   source.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  const vb = $("chart").viewBox.baseVal;
+  source.setAttribute("width", Math.round(vb.width));
+  source.setAttribute("height", Math.round(vb.height));
   const xml = new XMLSerializer().serializeToString(source);
   const blob = new Blob([xml], { type: "image/svg+xml;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
+  return URL.createObjectURL(blob);
+}
+
+function exportImage(format) {
+  const mime = format === "webp" ? "image/webp" : "image/png";
+  const extension = format === "webp" ? "webp" : "png";
+  const url = chartSvgBlobUrl();
   const img = new Image();
   img.onload = () => {
     const vb = $("chart").viewBox.baseVal;
     const canvas = document.createElement("canvas");
-    canvas.width = Math.round(vb.width * 2);
-    canvas.height = Math.round(vb.height * 2);
+    const scale = Math.min(2, Math.max(1, window.devicePixelRatio || 1.5));
+    canvas.width = Math.round(vb.width * scale);
+    canvas.height = Math.round(vb.height * scale);
     const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      URL.revokeObjectURL(url);
+      alert("이미지를 생성할 수 없습니다. 브라우저를 새로고침한 뒤 다시 시도해 주세요.");
+      return;
+    }
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     URL.revokeObjectURL(url);
-    canvas.toBlob(b => downloadBlob(b, "lens-roadmap.png", "image/png"));
+    canvas.toBlob(blob => {
+      if (!blob) {
+        alert(`${extension.toUpperCase()} 파일을 만들 수 없습니다.`);
+        return;
+      }
+      if (format === "webp" && blob.type !== mime) {
+        alert("현재 브라우저가 WebP 저장을 지원하지 않습니다. PNG 저장을 사용해 주세요.");
+        return;
+      }
+      downloadBlob(blob, `lens-roadmap.${extension}`, mime);
+    }, mime, format === "webp" ? 0.92 : undefined);
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(url);
+    alert("차트 이미지를 읽을 수 없습니다. 입력값을 확인한 뒤 다시 시도해 주세요.");
   };
   img.src = url;
 }
 
+function exportPng() {
+  exportImage("png");
+}
+
+function exportWebp() {
+  exportImage("webp");
+}
+
 function downloadBlob(content, filename, type) {
+  if (!content) return;
   const blob = content instanceof Blob ? content : new Blob([content], { type });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -788,7 +873,7 @@ function importJson(file) {
     try {
       const data = JSON.parse(reader.result);
       if (!Array.isArray(data.mounts) || !Array.isArray(data.lenses)) throw new Error("Invalid JSON");
-      state = {
+      state = normalizeState({
         mounts: data.mounts,
         styles: Array.isArray(data.styles) ? data.styles : clone(defaultData.styles),
         lenses: data.lenses.map(l => ({
@@ -802,7 +887,7 @@ function importJson(file) {
           tc14: !!l.tc14,
           tc20: !!l.tc20
         }))
-      };
+      });
       if (data.settings) {
         $("chartTitle").value = data.settings.chartTitle || $("chartTitle").value;
         $("displayMode").value = data.settings.displayMode || "equiv";
@@ -823,9 +908,15 @@ function importJson(file) {
 }
 
 function switchTab(tab) {
-  ["Mounts", "Styles", "Lenses"].forEach(name => {
+  const panelByTab = {
+    Mounts: "mountPanel",
+    Styles: "stylePanel",
+    Lenses: "lensPanel"
+  };
+
+  Object.keys(panelByTab).forEach(name => {
     $(`tab${name}`).classList.toggle("active", name === tab);
-    $(`${name.toLowerCase().slice(0, -1)}Panel`).hidden = name !== tab;
+    $(panelByTab[name]).hidden = name !== tab;
   });
 }
 
@@ -860,8 +951,8 @@ function bind() {
   $("parseLensBtn").addEventListener("click", () => applyParsedFocal(true));
   $("addLensBtn").addEventListener("click", addLens);
   $("autoFitAxisBtn").addEventListener("click", autoFitAxis);
-  $("saveSvgBtn").addEventListener("click", exportSvg);
   $("savePngBtn").addEventListener("click", exportPng);
+  $("saveWebpBtn").addEventListener("click", exportWebp);
   $("exportJsonBtn").addEventListener("click", exportJson);
   $("importJsonInput").addEventListener("change", e => e.target.files[0] && importJson(e.target.files[0]));
 
