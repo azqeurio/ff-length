@@ -367,6 +367,13 @@ function renderChart() {
   makeEl(svg, "line", { x1: leftType, y1: plotTop, x2: leftType, y2: plotBottom, stroke: "#4B4B4B", "stroke-width": 2 });
 
   let y = plotTop;
+  const deferredOverlays = [];
+  let deferredOverlaysDrawn = false;
+  const drawDeferredOverlays = () => {
+    if (deferredOverlaysDrawn) return;
+    deferredOverlays.forEach(draw => draw());
+    deferredOverlaysDrawn = true;
+  };
   rows.forEach(row => {
     const { type, items } = row;
     const isZoom = type === "zoom";
@@ -386,11 +393,14 @@ function renderChart() {
       return { lens, idx, style, start, end, startX, endX, label, color, cy };
     });
 
-    if (isZoom && $("showZoomGuides")?.checked) {
-      plottedItems.forEach(item => {
-        drawZoomGuide(svg, item.startX, y + 1, item.cy - 8);
-        drawZoomGuide(svg, item.endX, y + 1, item.cy - 8);
-      });
+    if (isZoom) {
+      if ($("showZoomGuides")?.checked) {
+        plottedItems.forEach(item => {
+          drawZoomGuide(svg, item.startX, plotTop + 1, item.cy - 8);
+          drawZoomGuide(svg, item.endX, plotTop + 1, item.cy - 8);
+        });
+      }
+      drawDeferredOverlays();
     }
 
     plottedItems.forEach(item => {
@@ -401,8 +411,13 @@ function renderChart() {
         const labelFitsRight = labelRightX + labelW < plotRight - 8;
         const labelX = labelFitsRight ? labelRightX : startX - 12;
         const anchor = labelFitsRight ? "start" : "end";
-        makeEl(svg, "circle", { cx: startX, cy, r: 4.5, fill: color });
-        makeText(svg, { x: labelX, y: cy + 4, "font-size": 10.8, "font-weight": 850, "text-anchor": anchor, fill: "#111111" }, label);
+        const maskX = anchor === "start" ? labelX - 3 : labelX - labelW - 3;
+        const redraw = () => {
+          makeEl(svg, "circle", { cx: startX, cy, r: 4.5, fill: color });
+          makeEl(svg, "rect", { x: maskX, y: cy - 9, width: labelW + 6, height: 15, fill: "#FFFFFF" });
+          makeText(svg, { x: labelX, y: cy + 4, "font-size": 10.8, "font-weight": 850, "text-anchor": anchor, fill: "#111111" }, label);
+        };
+        deferredOverlays.push(redraw);
         return;
       }
 
@@ -414,13 +429,14 @@ function renderChart() {
       makeText(svg, { x: labelX, y: cy + 20, "font-size": 11.5, "font-weight": style.weight, fill: "#111111" }, label);
 
       if ($("showTeleconverters").checked) {
-        if (lens.tc14) drawTc(svg, leftChart, chartW, x, endX, cy - 8, end * 1.4, max, "#B9A37C", "", "");
-        if (lens.tc20) drawTc(svg, leftChart, chartW, x, endX, cy + 8, end * 2, max, "#6F7C85", "", "");
+        if (lens.tc14) drawTc(svg, leftChart, chartW, x, endX, cy - 2, end * 1.4, max, "#B9A37C", "", "");
+        if (lens.tc20) drawTc(svg, leftChart, chartW, x, endX, cy + 2, end * 2, max, "#6F7C85", "", "");
       }
     });
 
     y += blockH;
   });
+  drawDeferredOverlays();
 
   makeText(svg, { x: plotLeft + 4, y: height - 16, "font-size": 11, "font-weight": 800, fill: "#111111" }, "As of current data");
 
