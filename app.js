@@ -389,9 +389,7 @@ function renderChart() {
         const labelFitsRight = labelRightX + labelW < plotRight - 8;
         const labelX = labelFitsRight ? labelRightX : startX - 12;
         const anchor = labelFitsRight ? "start" : "end";
-        makeEl(svg, "rect", { x: startX - 4, y: cy - 16, width: 8, height: 8, fill: color });
-        makeEl(svg, "line", { x1: startX, y1: cy - 8, x2: startX, y2: cy - 2, stroke: "#9CA3AF", "stroke-width": 1 });
-        makeEl(svg, "circle", { cx: startX, cy, r: 4, fill: color });
+        makeEl(svg, "circle", { cx: startX, cy, r: 4.5, fill: color });
         makeText(svg, { x: labelX, y: cy + 4, "font-size": 10.8, "font-weight": 850, "text-anchor": anchor, fill: "#111111" }, label);
         return;
       }
