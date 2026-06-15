@@ -285,7 +285,7 @@ function renderChart() {
     svg.parentElement.hidden = rows.length === 0;
   }
 
-  const rowH = 26;
+  const rowH = 34;
   const primeRowH = 25;
   const axisTop = 32;
   const plotTop = 78;
@@ -298,7 +298,7 @@ function renderChart() {
 
   let contentH = 0;
   rows.forEach(row => {
-    if (row.type === "zoom") contentH += Math.max(188, row.items.length * rowH + 38);
+    if (row.type === "zoom") contentH += Math.max(196, row.items.length * rowH + 44);
     else contentH += Math.max(138, row.items.length * primeRowH + 44);
   });
 
@@ -370,7 +370,7 @@ function renderChart() {
   rows.forEach(row => {
     const { type, items } = row;
     const isZoom = type === "zoom";
-    const blockH = isZoom ? Math.max(188, items.length * rowH + 38) : Math.max(138, items.length * primeRowH + 44);
+    const blockH = isZoom ? Math.max(196, items.length * rowH + 44) : Math.max(138, items.length * primeRowH + 44);
     makeEl(svg, "rect", { x: plotLeft, y, width: plotRight - plotLeft, height: blockH, fill: "#FFFFFF", stroke: "#4B4B4B", "stroke-width": 1.4 });
     makeText(svg, { x: labelColumnX, y: y + blockH / 2 + 6, "font-size": 19, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, categoryLabel(type));
 
@@ -395,14 +395,14 @@ function renderChart() {
         return;
       }
 
-      const cy = y + 30 + idx * rowH;
+      const cy = y + 33 + idx * rowH;
       makeEl(svg, "rect", { x: startX - 6, y: cy - 5, width: 8, height: 10, fill: color });
       makeEl(svg, "line", { x1: startX, y1: cy, x2: endX, y2: cy, stroke: color, "stroke-width": Number(style.width) + 1, "stroke-linecap": "butt", "stroke-dasharray": dashArray(style) });
-      makeText(svg, { x: clamp(startX + 9, leftChart + 7, width - right - 230), y: cy + 15, "font-size": 11.5, "font-weight": style.weight, fill: "#111111" }, label);
+      makeText(svg, { x: clamp(startX + 9, leftChart + 7, width - right - 230), y: cy + 20, "font-size": 11.5, "font-weight": style.weight, fill: "#111111" }, label);
 
       if ($("showTeleconverters").checked) {
-        if (lens.tc14) drawTc(svg, leftChart, chartW, x, endX, cy, end * 1.4, max, "#C9C9C9", "", "");
-        if (lens.tc20) drawTc(svg, leftChart, chartW, x, endX, cy, end * 2, max, "#C9C9C9", "", "");
+        if (lens.tc14) drawTc(svg, leftChart, chartW, x, endX, cy - 8, end * 1.4, max, "#B9A37C", "", "");
+        if (lens.tc20) drawTc(svg, leftChart, chartW, x, endX, cy + 8, end * 2, max, "#6F7C85", "", "");
       }
     });
 
@@ -413,6 +413,13 @@ function renderChart() {
 
   let lx = width - 320;
   const legendY = height - 14;
+  if ($("showTeleconverters").checked) {
+    const tcLegendX = plotLeft + 132;
+    makeEl(svg, "line", { x1: tcLegendX, y1: legendY - 4, x2: tcLegendX + 28, y2: legendY - 4, stroke: "#B9A37C", "stroke-width": 4, "stroke-linecap": "butt" });
+    makeText(svg, { x: tcLegendX + 35, y: legendY, "font-size": 11, "font-weight": 850, fill: "#111111" }, "1.4x TC");
+    makeEl(svg, "line", { x1: tcLegendX + 100, y1: legendY - 4, x2: tcLegendX + 128, y2: legendY - 4, stroke: "#6F7C85", "stroke-width": 4, "stroke-linecap": "butt" });
+    makeText(svg, { x: tcLegendX + 135, y: legendY, "font-size": 11, "font-weight": 850, fill: "#111111" }, "2x TC");
+  }
   state.styles.forEach(style => {
     const color = style.name.toLowerCase().includes("standard") ? "#9A9A9A" : "#1F1F1F";
     makeEl(svg, "rect", { x: lx, y: legendY - 8, width: 9, height: 9, fill: color });
@@ -424,7 +431,7 @@ function renderChart() {
 function drawTc(svg, leftChart, chartW, x, startX, y, tcEnd, max, color, dash, label) {
   if (tcEnd > max) return;
   const tcX = clamp(leftChart + x(tcEnd), leftChart, leftChart + chartW);
-  makeEl(svg, "line", { x1: startX, y1: y, x2: tcX, y2: y, stroke: color, "stroke-width": 5, "stroke-linecap": "butt", "stroke-dasharray": dash });
+  makeEl(svg, "line", { x1: startX, y1: y, x2: tcX, y2: y, stroke: color, "stroke-width": 4, "stroke-linecap": "butt", "stroke-dasharray": dash });
   if (label) makeText(svg, { x: tcX + 8, y: y + 4, "font-size": 10, "font-weight": 800, fill: "#64748B" }, label);
 }
 
