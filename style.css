@@ -33,9 +33,9 @@ body {
 }
 
 .app-shell {
-  width: min(1840px, 100%);
+  width: min(1720px, 100%);
   margin: 0 auto;
-  padding: 22px;
+  padding: 18px;
 }
 
 .topbar {
@@ -127,8 +127,8 @@ h2 {
 
 .main-grid {
   display: grid;
-  grid-template-columns: 410px minmax(0, 1fr);
-  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) 390px;
+  gap: 16px;
   align-items: start;
 }
 
@@ -138,6 +138,16 @@ h2 {
   min-width: 0;
   flex-direction: column;
   gap: 14px;
+}
+
+.workspace {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.sidebar {
+  grid-column: 2;
+  grid-row: 1;
 }
 
 .panel,
@@ -150,7 +160,7 @@ h2 {
 }
 
 .panel {
-  padding: 16px;
+  padding: 14px;
 }
 
 .panel.compact {
@@ -294,6 +304,14 @@ input[type="color"] {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.35;
+}
+
+.sheet-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
 }
 
 .preset-row { margin-top: 12px; }
@@ -441,19 +459,19 @@ input[type="color"] {
   justify-content: space-between;
   gap: 18px;
   align-items: center;
-  padding: 18px 20px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--line);
   background: #fff;
 }
 
 .chart-toolbar h2 {
-  font-size: 22px;
+  font-size: 19px;
 }
 
 .chart-toolbar p:last-child {
   margin: 4px 0 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .legend-note {
@@ -465,15 +483,16 @@ input[type="color"] {
 }
 
 .chart-scroll {
-  overflow: auto;
-  padding: 10px;
-  background: linear-gradient(180deg, #fff, #f8fafc);
+  overflow: hidden;
+  padding: 8px;
+  background: #fff;
 }
 
 #chart {
   display: block;
-  width: 1580px;
-  min-width: 1580px;
+  width: 100%;
+  min-width: 0;
+  max-height: calc(100vh - 158px);
   height: auto;
 }
 
@@ -600,7 +619,10 @@ tr:last-child td { border-bottom: 0; }
 @media (min-width: 1181px) {
   .sidebar {
     position: sticky;
-    top: 16px;
+    top: 12px;
+    max-height: calc(100vh - 24px);
+    overflow: auto;
+    padding-right: 2px;
   }
 }
 
@@ -619,7 +641,17 @@ tr:last-child td { border-bottom: 0; }
     grid-template-columns: 1fr;
   }
 
+  .workspace,
   .sidebar {
+    grid-column: 1;
+  }
+
+  .workspace {
+    grid-row: 1;
+  }
+
+  .sidebar {
+    grid-row: 2;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

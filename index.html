@@ -22,14 +22,6 @@
       </div>
     </header>
 
-    <section class="intro">
-      <div>
-        <p class="kicker">Prime과 Zoom을 보기 좋게 정리</p>
-        <p>렌즈 이름을 붙여 넣고 초점거리만 확인하세요. 축 기준, 라벨 표기, 텔레컨버터 범위를 따로 조정해서 바로 공유 가능한 로드맵을 만들 수 있습니다.</p>
-      </div>
-      <div id="mountSummary" class="summary" aria-label="마운트 요약"></div>
-    </section>
-
     <main class="main-grid">
       <aside class="sidebar" aria-label="로드맵 편집 패널">
         <section class="panel panel-accent">
@@ -81,6 +73,21 @@
           <div class="panel-head">
             <span class="step">02</span>
             <div>
+              <h2>Excel로 가져오기</h2>
+              <p>양식 파일을 내려받아 채운 뒤 업로드하면 렌즈가 자동으로 추가됩니다.</p>
+            </div>
+          </div>
+          <div class="button-row">
+            <button id="downloadSheetTemplateBtn" class="btn" type="button">Excel 양식 다운로드</button>
+            <label class="btn btn-soft file-btn">Excel 업로드<input id="importSheetInput" type="file" accept=".xlsx,.xls,.csv" hidden /></label>
+          </div>
+          <p class="sheet-note">렌즈명, 마운트, 크롭, 스타일, 초점거리 또는 시작/끝 mm 열을 인식합니다.</p>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <span class="step">03</span>
+            <div>
               <h2>차트 출력 설정</h2>
               <p>축은 배치 기준, 라벨은 표기 방식을 따로 선택합니다.</p>
             </div>
@@ -129,7 +136,7 @@
 
         <section class="panel">
           <div class="panel-head">
-            <span class="step">03</span>
+            <span class="step">04</span>
             <div>
               <h2>마운트 만들기</h2>
               <p>프리셋을 누르면 바로 추가되고, 이미 있으면 선택만 됩니다.</p>
@@ -153,7 +160,7 @@
 
         <section class="panel">
           <div class="panel-head">
-            <span class="step">04</span>
+            <span class="step">05</span>
             <div>
               <h2>스타일 만들기</h2>
               <p>브랜드 라인업, 등급, 시대별 렌즈를 구분할 때 씁니다.</p>
@@ -250,6 +257,7 @@
   </template>
 
   <div id="toast" class="toast" hidden></div>
+  <script src="vendor/xlsx.full.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

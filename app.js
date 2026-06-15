@@ -250,22 +250,21 @@ function chartLensName(name) {
 }
 
 function chartRows() {
-  const rows = [];
-  state.mounts.forEach(mount => {
-    const mountLenses = state.lenses.filter(l => l.mountId === mount.id);
-    if (!mountLenses.length) return;
-    rows.push({ kind: "mountHeader", mount });
-    ["prime", "macro", "zoom"].forEach(type => {
-      const items = mountLenses.filter(l => lensCategory(l) === type);
-      if (items.length) rows.push({ kind: "lensGroup", mount, type, items });
-    });
-  });
-  return rows;
+  return ["prime", "macro", "zoom"]
+    .map(type => ({
+      kind: "lensGroup",
+      type,
+      items: state.lenses
+        .filter(l => lensCategory(l) === type)
+        .sort((a, b) => Number(a.start) - Number(b.start) || Number(a.end) - Number(b.end) || a.name.localeCompare(b.name))
+    }))
+    .filter(row => row.items.length);
 }
 
-function referenceCrop(rows) {
-  const mountRow = rows.find(row => row.kind === "mountHeader");
-  return mountRow ? Number(mountRow.mount.crop) || 1 : 1;
+function referenceCrop() {
+  const firstLens = state.lenses.find(lens => mountById(lens.mountId));
+  const mount = firstLens ? mountById(firstLens.mountId) : state.mounts[0];
+  return mount ? Number(mount.crop) || 1 : 1;
 }
 
 function axisPair(value, crop) {
@@ -273,14 +272,6 @@ function axisPair(value, crop) {
     return { actual: value / crop, equiv: value };
   }
   return { actual: value, equiv: value * crop };
-}
-
-function drawLensIcon(svg, x, y, color, variant = "dark") {
-  const body = variant === "light" ? "#4B5563" : "#111827";
-  makeEl(svg, "rect", { x: x - 13, y: y - 6, width: 22, height: 12, rx: 3, fill: body, stroke: "#0F172A", "stroke-width": .7 });
-  makeEl(svg, "rect", { x: x - 6, y: y - 8, width: 11, height: 16, rx: 3, fill: "#1F2937", stroke: "#0F172A", "stroke-width": .7 });
-  makeEl(svg, "ellipse", { cx: x + 9, cy: y, rx: 5, ry: 8, fill: color, opacity: .92, stroke: "#0F172A", "stroke-width": .7 });
-  makeEl(svg, "ellipse", { cx: x + 9, cy: y, rx: 2.6, ry: 5, fill: "#E5E7EB", opacity: .42 });
 }
 
 function renderChart() {
@@ -294,28 +285,23 @@ function renderChart() {
     svg.parentElement.hidden = rows.length === 0;
   }
 
-  const rowH = 42;
-  const groupHeaderH = 30;
-  const axisTop = 42;
-  const plotTop = 104;
-  const leftType = 140;
-  const leftChart = 220;
-  const right = 42;
-  const width = 1520;
-  const footerH = 58;
-  const crop = referenceCrop(rows);
+  const rowH = 26;
+  const axisTop = 32;
+  const plotTop = 78;
+  const leftType = 92;
+  const leftChart = 156;
+  const right = 24;
+  const width = 1280;
+  const footerH = 34;
+  const crop = referenceCrop();
 
   let contentH = 0;
   rows.forEach(row => {
-    if (row.kind === "mountHeader") {
-      contentH += groupHeaderH;
-      return;
-    }
-    if (row.type === "zoom") contentH += Math.max(160, row.items.length * rowH + 40);
-    else contentH += Math.max(230, Math.ceil(row.items.length / 4) * 132 + 28);
+    if (row.type === "zoom") contentH += Math.max(188, row.items.length * rowH + 38);
+    else contentH += Math.max(128, Math.ceil(row.items.length / 4) * 64 + 26);
   });
 
-  const height = Math.max(720, plotTop + contentH + footerH);
+  const height = Math.max(560, plotTop + contentH + footerH);
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
   svg.setAttribute("width", width);
   svg.setAttribute("height", height);
@@ -355,9 +341,9 @@ function renderChart() {
   });
   const labelTickSet = new Set(labeledTicks.map(item => item.t));
 
-  makeText(svg, { x: 76, y: axisTop + 5, "font-size": 14, "font-weight": 800, "text-anchor": "middle", fill: "#111827" }, labelMode === "equiv" ? "35mm equivalent" : "focal length");
+  makeText(svg, { x: 50, y: axisTop + 4, "font-size": 12, "font-weight": 800, "text-anchor": "middle", fill: "#111827" }, labelMode === "equiv" ? "35mm equivalent" : "focal length");
   if (labelMode === "both") {
-    makeText(svg, { x: 76, y: axisTop + 29, "font-size": 12, "font-weight": 700, "text-anchor": "middle", fill: "#111827" }, "(35mm equivalent)");
+    makeText(svg, { x: 50, y: axisTop + 24, "font-size": 10, "font-weight": 700, "text-anchor": "middle", fill: "#111827" }, "(35mm equivalent)");
   }
 
   ticks.forEach(t => {
@@ -366,12 +352,12 @@ function renderChart() {
     makeEl(svg, "line", { x1: px, y1: plotTop, x2: px, y2: plotBottom, stroke: "#BEBEBE", "stroke-width": 1.2, "stroke-dasharray": "5 7" });
     if (!labelTickSet.has(t)) return;
     if (labelMode === "both") {
-      makeText(svg, { x: px, y: axisTop, "font-size": 18, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, `${clean(pair.actual)}mm`);
-      makeText(svg, { x: px, y: axisTop + 24, "font-size": 13, "font-weight": 750, "text-anchor": "middle", fill: "#111111" }, `${clean(pair.equiv)}mm`);
+      makeText(svg, { x: px, y: axisTop, "font-size": 16, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, `${clean(pair.actual)}mm`);
+      makeText(svg, { x: px, y: axisTop + 20, "font-size": 11, "font-weight": 750, "text-anchor": "middle", fill: "#111111" }, `${clean(pair.equiv)}mm`);
     } else if (labelMode === "equiv") {
-      makeText(svg, { x: px, y: axisTop + 10, "font-size": 18, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, `${clean(pair.equiv)}mm`);
+      makeText(svg, { x: px, y: axisTop + 8, "font-size": 16, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, `${clean(pair.equiv)}mm`);
     } else {
-      makeText(svg, { x: px, y: axisTop + 10, "font-size": 18, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, `${clean(pair.actual)}mm`);
+      makeText(svg, { x: px, y: axisTop + 8, "font-size": 16, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, `${clean(pair.actual)}mm`);
     }
   });
 
@@ -380,20 +366,11 @@ function renderChart() {
 
   let y = plotTop;
   rows.forEach(row => {
-    if (row.kind === "mountHeader") {
-      const m = row.mount;
-      const count = state.lenses.filter(l => l.mountId === m.id).length;
-      makeEl(svg, "rect", { x: plotLeft, y, width: plotRight - plotLeft, height: groupHeaderH, fill: "#FAFAFA", stroke: "#DADADA", "stroke-width": 1 });
-      makeText(svg, { x: leftType + 12, y: y + 20, "font-size": 13, "font-weight": 800, fill: "#111111" }, `${m.name} · crop x${clean(m.crop)} · ${count} lenses`);
-      y += groupHeaderH;
-      return;
-    }
-
     const { type, items } = row;
     const isZoom = type === "zoom";
-    const blockH = isZoom ? Math.max(160, items.length * rowH + 40) : Math.max(230, Math.ceil(items.length / 4) * 132 + 28);
+    const blockH = isZoom ? Math.max(188, items.length * rowH + 38) : Math.max(128, Math.ceil(items.length / 4) * 64 + 26);
     makeEl(svg, "rect", { x: plotLeft, y, width: plotRight - plotLeft, height: blockH, fill: "#FFFFFF", stroke: "#4B4B4B", "stroke-width": 1.4 });
-    makeText(svg, { x: 76, y: y + blockH / 2 + 8, "font-size": 22, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, categoryLabel(type));
+    makeText(svg, { x: 51, y: y + blockH / 2 + 6, "font-size": 19, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, categoryLabel(type));
 
     items.forEach((lens, idx) => {
       const style = styleById(lens.styleId);
@@ -407,17 +384,18 @@ function renderChart() {
       if (!isZoom) {
         const lane = idx % 4;
         const row = Math.floor(idx / 4);
-        const cy = y + 58 + row * 132 + lane * 32;
-        makeEl(svg, "rect", { x: startX - 5, y: cy - 45, width: 10, height: 10, fill: color });
-        drawLensIcon(svg, startX, cy - 12, color, style.name.toLowerCase().includes("standard") ? "light" : "dark");
-        makeText(svg, { x: startX, y: cy + 13, "font-size": 12.5, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, label);
+        const cy = y + 38 + row * 64 + lane * 15;
+        makeEl(svg, "rect", { x: startX - 4, y: cy - 25, width: 8, height: 8, fill: color });
+        makeEl(svg, "line", { x1: startX, y1: cy - 17, x2: startX, y2: cy - 3, stroke: "#9CA3AF", "stroke-width": 1 });
+        makeEl(svg, "circle", { cx: startX, cy, r: 4, fill: color });
+        makeText(svg, { x: startX, y: cy + 14, "font-size": 10.5, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, label);
         return;
       }
 
-      const cy = y + 42 + idx * rowH;
-      drawLensIcon(svg, startX - 26, cy - 7, color, color === "#9A9A9A" ? "light" : "dark");
+      const cy = y + 30 + idx * rowH;
+      makeEl(svg, "rect", { x: startX - 6, y: cy - 5, width: 8, height: 10, fill: color });
       makeEl(svg, "line", { x1: startX, y1: cy, x2: endX, y2: cy, stroke: color, "stroke-width": Number(style.width) + 1, "stroke-linecap": "butt", "stroke-dasharray": dashArray(style) });
-      makeText(svg, { x: clamp(startX + 10, leftChart + 8, width - right - 260), y: cy + 18, "font-size": 14, "font-weight": style.weight, fill: "#111111" }, label);
+      makeText(svg, { x: clamp(startX + 9, leftChart + 7, width - right - 230), y: cy + 15, "font-size": 11.5, "font-weight": style.weight, fill: "#111111" }, label);
 
       if ($("showTeleconverters").checked) {
         if (lens.tc14) drawTc(svg, leftChart, chartW, x, endX, cy, end * 1.4, max, "#C9C9C9", "", "");
@@ -428,15 +406,15 @@ function renderChart() {
     y += blockH;
   });
 
-  makeText(svg, { x: plotLeft + 4, y: height - 34, "font-size": 13, "font-weight": 800, fill: "#111111" }, "As of current data");
+  makeText(svg, { x: plotLeft + 4, y: height - 16, "font-size": 11, "font-weight": 800, fill: "#111111" }, "As of current data");
 
-  let lx = width - 360;
-  const legendY = height - 30;
+  let lx = width - 320;
+  const legendY = height - 14;
   state.styles.forEach(style => {
     const color = style.name.toLowerCase().includes("standard") ? "#9A9A9A" : "#1F1F1F";
-    makeEl(svg, "rect", { x: lx, y: legendY - 10, width: 11, height: 11, fill: color });
-    makeText(svg, { x: lx + 18, y: legendY, "font-size": 15, "font-weight": 850, fill: "#111111", "font-style": "italic" }, style.name);
-    lx += Math.max(100, style.name.length * 9 + 44);
+    makeEl(svg, "rect", { x: lx, y: legendY - 8, width: 9, height: 9, fill: color });
+    makeText(svg, { x: lx + 15, y: legendY, "font-size": 12, "font-weight": 850, fill: "#111111", "font-style": "italic" }, style.name);
+    lx += Math.max(82, style.name.length * 7 + 34);
   });
 }
 
@@ -497,6 +475,7 @@ function renderStyleSelect() {
 
 function renderMountSummary() {
   const box = $("mountSummary");
+  if (!box) return;
   box.innerHTML = "";
 
   if (!state.mounts.length) {
@@ -957,6 +936,185 @@ function importJson(file) {
   reader.readAsText(file);
 }
 
+const sheetAliases = {
+  name: ["렌즈명", "렌즈 이름", "렌즈", "lens name", "lens", "name"],
+  mount: ["마운트", "mount", "mount name", "system"],
+  crop: ["크롭", "크롭팩터", "crop", "crop factor"],
+  style: ["스타일", "등급", "라인", "style", "line", "grade"],
+  focal: ["초점거리", "화각", "focal", "focal length", "range", "mm"],
+  start: ["시작mm", "시작 mm", "시작", "start", "start mm", "wide"],
+  end: ["끝mm", "끝 mm", "끝", "end", "end mm", "tele"],
+  type: ["유형", "타입", "type"],
+  tc14: ["1.4x", "tc14", "tc 1.4", "teleconverter 1.4"],
+  tc20: ["2x", "tc20", "tc 2", "teleconverter 2"]
+};
+
+function sheetKey(value) {
+  return String(value || "").toLowerCase().replace(/[\s_\-().:/]/g, "");
+}
+
+function sheetValue(row, key) {
+  const aliases = sheetAliases[key].map(sheetKey);
+  const entry = Object.entries(row).find(([header]) => aliases.includes(sheetKey(header)));
+  return entry ? entry[1] : "";
+}
+
+function sheetNumber(value) {
+  if (typeof value === "number") return value;
+  const match = String(value || "").match(/(\d+(?:\.\d+)?)/);
+  return match ? Number(match[1]) : 0;
+}
+
+function sheetBool(value) {
+  if (value === true) return true;
+  const text = String(value || "").trim().toLowerCase();
+  return ["1", "true", "yes", "y", "o", "ok", "on", "v", "가능", "지원", "사용", "체크"].includes(text);
+}
+
+function sheetType(value, start, end) {
+  const text = String(value || "").toLowerCase();
+  if (text.includes("prime") || text.includes("단")) return "prime";
+  if (text.includes("zoom") || text.includes("줌")) return "zoom";
+  return Number(start) === Number(end) ? "prime" : "zoom";
+}
+
+function ensureSheetMount(name, crop) {
+  const fallback = state.mounts[0] || { name: "Default Mount", crop: 1, color: "#111827" };
+  const cleanName = String(name || fallback.name).trim() || "Default Mount";
+  const cleanCrop = Number(crop) || Number(fallback.crop) || 1;
+  const existing = state.mounts.find(m => m.name.toLowerCase() === cleanName.toLowerCase());
+  if (existing) {
+    if (!existing.crop && cleanCrop) existing.crop = cleanCrop;
+    return existing;
+  }
+
+  const colors = ["#111827", "#2563EB", "#64748B", "#7C3AED", "#059669", "#DC2626"];
+  const mount = {
+    id: `${slug(cleanName)}-${Math.random().toString(36).slice(2, 7)}`,
+    name: cleanName,
+    crop: cleanCrop,
+    color: colors[state.mounts.length % colors.length]
+  };
+  state.mounts.push(mount);
+  return mount;
+}
+
+function ensureSheetStyle(name) {
+  const fallback = state.styles[0] || { name: "Standard", color: "#667085", dash: "solid", width: 5, weight: 800 };
+  const cleanName = String(name || fallback.name).trim() || "Standard";
+  const existing = state.styles.find(s => s.name.toLowerCase() === cleanName.toLowerCase());
+  if (existing) return existing;
+
+  const style = {
+    id: `${slug(cleanName)}-${Math.random().toString(36).slice(2, 7)}`,
+    name: cleanName,
+    color: fallback.color || "#667085",
+    dash: "solid",
+    width: 5,
+    weight: /standard|basic|보급/i.test(cleanName) ? 650 : 800
+  };
+  state.styles.push(style);
+  return style;
+}
+
+function lensFromSheetRow(row) {
+  const name = String(sheetValue(row, "name") || "").trim();
+  const focalText = sheetValue(row, "focal");
+  let start = sheetNumber(sheetValue(row, "start"));
+  let end = sheetNumber(sheetValue(row, "end"));
+  const parsed = parseFocalRange(focalText) || parseFocalRange(name);
+
+  if (!start && parsed) start = parsed.start;
+  if (!end && parsed) end = parsed.end;
+  if (!end) end = start;
+  if (!name || !start || !end) return null;
+
+  const mount = ensureSheetMount(sheetValue(row, "mount"), sheetNumber(sheetValue(row, "crop")));
+  const style = ensureSheetStyle(sheetValue(row, "style"));
+  const cleanStart = Math.min(start, end);
+  const cleanEnd = Math.max(start, end);
+
+  return {
+    id: uid(),
+    mountId: mount.id,
+    type: sheetType(sheetValue(row, "type"), cleanStart, cleanEnd),
+    styleId: style.id,
+    name,
+    start: cleanStart,
+    end: cleanEnd,
+    tc14: sheetBool(sheetValue(row, "tc14")),
+    tc20: sheetBool(sheetValue(row, "tc20"))
+  };
+}
+
+function sheetLib() {
+  if (typeof XLSX !== "undefined") return XLSX;
+  if (typeof globalThis !== "undefined" && globalThis.XLSX) return globalThis.XLSX;
+  return null;
+}
+
+function importSheet(file) {
+  const xlsx = sheetLib();
+  if (!xlsx) {
+    alert("Excel 파일을 읽는 라이브러리를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const workbook = xlsx.read(reader.result, { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = xlsx.utils.sheet_to_json(sheet, { defval: "" });
+      let imported = 0;
+      let skipped = 0;
+
+      rows.forEach(row => {
+        const lens = lensFromSheetRow(row);
+        if (!lens) {
+          skipped += 1;
+          return;
+        }
+        state.lenses.push(lens);
+        imported += 1;
+      });
+
+      if (!imported) {
+        alert("가져올 렌즈를 찾지 못했습니다. 양식의 렌즈명과 초점거리 열을 확인해 주세요.");
+        return;
+      }
+
+      saveState();
+      renderAll();
+      toast(skipped ? `${imported}개 렌즈를 가져왔고 ${skipped}개 행은 건너뛰었습니다.` : `${imported}개 렌즈를 가져왔습니다.`);
+    } catch {
+      alert("Excel 파일을 읽지 못했습니다. .xlsx, .xls, .csv 형식인지 확인해 주세요.");
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function downloadSheetTemplate() {
+  const rows = [
+    { "렌즈명": "M.Zuiko Digital ED 12-40mm F2.8 PRO II", "마운트": "Micro Four Thirds", "크롭": 2, "스타일": "PRO / Leica", "초점거리": "12-40mm", "시작mm": 12, "끝mm": 40, "유형": "Zoom", "1.4x": "", "2x": "" },
+    { "렌즈명": "M.Zuiko Digital ED 25mm F1.2 PRO", "마운트": "Micro Four Thirds", "크롭": 2, "스타일": "PRO / Leica", "초점거리": "25mm", "시작mm": 25, "끝mm": 25, "유형": "Prime", "1.4x": "", "2x": "" }
+  ];
+
+  const xlsx = sheetLib();
+  if (xlsx) {
+    const worksheet = xlsx.utils.json_to_sheet(rows);
+    const workbook = xlsx.utils.book_new();
+    xlsx.utils.book_append_sheet(workbook, worksheet, "Lenses");
+    const content = xlsx.write(workbook, { bookType: "xlsx", type: "array" });
+    downloadBlob(new Blob([content], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "lens-roadmap-template.xlsx");
+    return;
+  }
+
+  const headers = Object.keys(rows[0]);
+  const csv = "\uFEFF" + [headers.join(","), ...rows.map(row => headers.map(header => `"${String(row[header] ?? "").replace(/"/g, '""')}"`).join(","))].join("\n");
+  downloadBlob(csv, "lens-roadmap-template.csv", "text/csv;charset=utf-8");
+}
+
 function switchTab(tab) {
   const panelByTab = {
     Mounts: "mountPanel",
@@ -1005,6 +1163,8 @@ function bind() {
   $("saveWebpBtn").addEventListener("click", exportWebp);
   $("exportJsonBtn").addEventListener("click", exportJson);
   $("importJsonInput").addEventListener("change", e => e.target.files[0] && importJson(e.target.files[0]));
+  $("downloadSheetTemplateBtn").addEventListener("click", downloadSheetTemplate);
+  $("importSheetInput").addEventListener("change", e => e.target.files[0] && importSheet(e.target.files[0]));
 
   $("lensName").addEventListener("input", () => {
     applyParsedFocal(false);
