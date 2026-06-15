@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lens Roadmap Studio</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">LR</span>
+        <div>
+          <p class="eyebrow">Lens Roadmap Studio</p>
+          <h1>마운트별 렌즈 화각 로드맵</h1>
+        </div>
+      </div>
+      <div class="top-actions" aria-label="내보내기 도구">
+        <button id="savePngBtn" class="btn btn-primary">PNG 저장</button>
+        <button id="saveSvgBtn" class="btn">SVG 저장</button>
+        <button id="exportJsonBtn" class="btn">JSON 내보내기</button>
+        <label class="btn file-btn">JSON 불러오기<input id="importJsonInput" type="file" accept="application/json" hidden /></label>
+      </div>
+    </header>
+
+    <section class="intro">
+      <div>
+        <p class="kicker">Prime과 Zoom을 한 화면에서 비교</p>
+        <p>마운트, 크롭 팩터, 렌즈 스타일을 직접 만들고 35mm 환산 화각 또는 실제 초점거리 기준으로 로드맵을 확인하세요.</p>
+      </div>
+      <div id="mountSummary" class="summary" aria-label="마운트 요약"></div>
+    </section>
+
+    <main class="main-grid">
+      <aside class="sidebar" aria-label="로드맵 편집 패널">
+        <section class="panel">
+          <div class="panel-head">
+            <span class="step">01</span>
+            <div>
+              <h2>차트 설정</h2>
+              <p>표시 기준과 축 범위를 정합니다.</p>
+            </div>
+          </div>
+          <label class="field"><span>표시 기준</span>
+            <select id="displayMode">
+              <option value="equiv" selected>35mm 환산 화각 기준</option>
+              <option value="actual">실제 초점거리 기준</option>
+            </select>
+          </label>
+          <label class="field"><span>축 스케일</span>
+            <select id="scaleMode">
+              <option value="log" selected>로드맵형 로그 스케일</option>
+              <option value="linear">선형 스케일</option>
+            </select>
+          </label>
+          <label class="field"><span>차트 제목</span><input id="chartTitle" type="text" value="My Lens Roadmap" /></label>
+          <div class="two-col">
+            <label class="field"><span>축 최소값</span><input id="axisMin" type="number" value="14" min="1" step="1" /></label>
+            <label class="field"><span>축 최대값</span><input id="axisMax" type="number" value="1600" min="10" step="10" /></label>
+          </div>
+          <div class="toggle-row">
+            <label class="switch" aria-label="텔레컨버터 확장 범위 표시"><input id="showTeleconverters" type="checkbox" checked><span></span></label>
+            <div><strong>텔레컨버터 확장 범위 표시</strong><p>1.4x와 2x 확장을 점선으로 표시합니다.</p></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <span class="step">02</span>
+            <div>
+              <h2>마운트 만들기</h2>
+              <p>센서 크기나 시스템별로 행을 나눕니다.</p>
+            </div>
+          </div>
+          <label class="field"><span>새 마운트 이름</span><input id="newMountName" type="text" placeholder="예: Nikon Z, Sony E, L Mount" /></label>
+          <div class="two-col">
+            <label class="field"><span>크롭 팩터</span><input id="newMountCrop" type="number" value="1" min="0.1" step="0.1" /></label>
+            <label class="field"><span>마운트 색상</span><input id="newMountColor" type="color" value="#2563EB" /></label>
+          </div>
+          <button id="addMountBtn" class="btn btn-primary full">마운트 추가</button>
+          <div class="preset-row" aria-label="마운트 프리셋">
+            <button class="chip mount-preset" data-name="Full Frame" data-crop="1" data-color="#111827">Full Frame</button>
+            <button class="chip mount-preset" data-name="APS-C" data-crop="1.5" data-color="#7C3AED">APS-C</button>
+            <button class="chip mount-preset" data-name="Canon APS-C" data-crop="1.6" data-color="#DC2626">Canon APS-C</button>
+            <button class="chip mount-preset" data-name="Micro Four Thirds" data-crop="2" data-color="#2563EB">MFT</button>
+            <button class="chip mount-preset" data-name="Four Thirds" data-crop="2" data-color="#64748B">Four Thirds</button>
+            <button class="chip mount-preset" data-name="1-inch" data-crop="2.7" data-color="#059669">1-inch</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <span class="step">03</span>
+            <div>
+              <h2>스타일 만들기</h2>
+              <p>브랜드 라인업이나 등급을 구분합니다.</p>
+            </div>
+          </div>
+          <label class="field"><span>새 스타일 이름</span><input id="newStyleName" type="text" placeholder="예: PRO, GM, L, Vintage, Budget" /></label>
+          <div class="two-col">
+            <label class="field"><span>색상</span><input id="newStyleColor" type="color" value="#2563EB" /></label>
+            <label class="field"><span>선 모양</span>
+              <select id="newStyleDash">
+                <option value="solid" selected>실선</option>
+                <option value="dash">긴 점선</option>
+                <option value="dot">짧은 점선</option>
+              </select>
+            </label>
+          </div>
+          <div class="two-col">
+            <label class="field"><span>선 두께</span><input id="newStyleWidth" type="number" value="5" min="2" max="10" step="0.5" /></label>
+            <label class="field"><span>텍스트 굵기</span>
+              <select id="newStyleWeight">
+                <option value="650">보통</option>
+                <option value="800" selected>굵게</option>
+              </select>
+            </label>
+          </div>
+          <button id="addStyleBtn" class="btn btn-primary full">스타일 추가</button>
+          <div class="preset-row" aria-label="스타일 프리셋">
+            <button class="chip style-preset" data-name="PRO / Leica" data-color="#2563EB">PRO / Leica</button>
+            <button class="chip style-preset" data-name="Standard" data-color="#667085">Standard</button>
+            <button class="chip style-preset" data-name="Vintage / Film" data-color="#111827">Vintage</button>
+            <button class="chip style-preset" data-name="Budget" data-color="#16A34A">Budget</button>
+            <button class="chip style-preset" data-name="Premium" data-color="#C026D3">Premium</button>
+          </div>
+        </section>
+
+        <section class="panel panel-accent">
+          <div class="panel-head">
+            <span class="step">04</span>
+            <div>
+              <h2>렌즈 추가</h2>
+              <p>단렌즈는 시작과 끝 mm를 같게 넣으면 됩니다.</p>
+            </div>
+          </div>
+          <label class="field"><span>마운트</span><select id="lensMount"></select></label>
+          <label class="field"><span>렌즈 이름</span><input id="lensName" type="text" placeholder="예: M.Zuiko Digital ED 12-40mm F2.8 PRO II" /></label>
+          <div class="two-col">
+            <label class="field"><span>시작 mm</span><input id="focalStart" type="number" min="0.1" step="0.1" placeholder="12" /></label>
+            <label class="field"><span>끝 mm</span><input id="focalEnd" type="number" min="0.1" step="0.1" placeholder="40" /></label>
+          </div>
+          <div class="two-col">
+            <label class="field"><span>렌즈 유형</span>
+              <select id="lensType">
+                <option value="prime">Prime</option>
+                <option value="zoom" selected>Zoom</option>
+              </select>
+            </label>
+            <label class="field"><span>스타일</span><select id="lensStyle"></select></label>
+          </div>
+          <div class="tc-box">
+            <p>텔레컨버터 호환</p>
+            <label class="check"><input id="tc14" type="checkbox"> 1.4x</label>
+            <label class="check"><input id="tc20" type="checkbox"> 2x</label>
+          </div>
+          <button id="addLensBtn" class="btn btn-primary full">렌즈 추가</button>
+        </section>
+
+        <section class="panel compact">
+          <div class="button-row">
+            <button id="loadSampleBtn" class="btn">샘플 불러오기</button>
+            <button id="clearBtn" class="btn btn-danger">전체 삭제</button>
+          </div>
+        </section>
+      </aside>
+
+      <section class="workspace">
+        <section class="chart-card">
+          <div class="chart-toolbar">
+            <div>
+              <p class="section-label">Live Preview</p>
+              <h2 id="liveTitle">My Lens Roadmap</h2>
+              <p id="liveDesc">35mm 환산 화각 기준</p>
+            </div>
+            <div class="legend-note">가로 스크롤로 긴 로드맵을 확인할 수 있습니다.</div>
+          </div>
+          <div id="emptyState" class="empty-state" hidden>
+            <strong>아직 표시할 렌즈가 없습니다.</strong>
+            <span>마운트와 스타일을 만든 뒤 렌즈를 추가하면 로드맵이 여기에 나타납니다.</span>
+          </div>
+          <div class="chart-scroll"><svg id="chart" role="img" aria-label="렌즈 로드맵 차트"></svg></div>
+        </section>
+
+        <section class="data-card">
+          <div class="tabs" role="tablist" aria-label="데이터 테이블">
+            <button id="tabMounts" class="tab active" type="button">마운트</button>
+            <button id="tabStyles" class="tab" type="button">스타일</button>
+            <button id="tabLenses" class="tab" type="button">렌즈</button>
+          </div>
+          <div id="mountPanel"><div class="table-wrap"><table>
+            <thead><tr><th>마운트</th><th>크롭</th><th>렌즈 수</th><th>색상</th><th></th></tr></thead>
+            <tbody id="mountTable"></tbody>
+          </table></div></div>
+          <div id="stylePanel" hidden><div class="table-wrap"><table>
+            <thead><tr><th>스타일</th><th>렌즈 수</th><th>미리보기</th><th>선 모양</th><th>선 두께</th><th></th></tr></thead>
+            <tbody id="styleTable"></tbody>
+          </table></div></div>
+          <div id="lensPanel" hidden><div class="table-wrap"><table>
+            <thead><tr><th>렌즈</th><th>마운트</th><th>유형</th><th>실제 초점거리</th><th>35mm 환산</th><th>스타일</th><th></th></tr></thead>
+            <tbody id="lensTable"></tbody>
+          </table></div></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <template id="mountRowTemplate">
+    <tr><td class="mount-name"></td><td class="mount-crop"></td><td class="mount-count"></td><td class="mount-color"></td><td><button class="small-btn danger">삭제</button></td></tr>
+  </template>
+  <template id="styleRowTemplate">
+    <tr><td class="style-name"></td><td class="style-count"></td><td class="style-preview-cell"></td><td class="style-dash"></td><td class="style-width"></td><td><button class="small-btn danger">삭제</button></td></tr>
+  </template>
+  <template id="lensRowTemplate">
+    <tr><td class="lens-name"></td><td class="lens-mount"></td><td class="lens-type"></td><td class="lens-actual"></td><td class="lens-equiv"></td><td class="lens-style"></td><td><button class="small-btn danger">삭제</button></td></tr>
+  </template>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>
