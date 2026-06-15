@@ -82,6 +82,18 @@
             <label class="btn btn-soft file-btn">Excel 업로드<input id="importSheetInput" type="file" accept=".xlsx,.xls,.csv" hidden /></label>
           </div>
           <p class="sheet-note">렌즈명, 마운트, 크롭, 스타일, 초점거리 또는 시작/끝 mm 열을 인식합니다.</p>
+          <details class="example-box">
+            <summary>업로드 예제 보기</summary>
+            <div class="example-table-wrap">
+              <table class="example-table">
+                <thead><tr><th>렌즈명</th><th>마운트</th><th>크롭</th><th>스타일</th><th>초점거리</th><th>시작mm</th><th>끝mm</th><th>유형</th><th>1.4x</th><th>2x</th></tr></thead>
+                <tbody>
+                  <tr><td>M.Zuiko Digital ED 12-40mm F2.8 PRO II</td><td>Micro Four Thirds</td><td>2</td><td>PRO / Leica</td><td>12-40mm</td><td>12</td><td>40</td><td>Zoom</td><td></td><td></td></tr>
+                  <tr><td>M.Zuiko Digital ED 25mm F1.2 PRO</td><td>Micro Four Thirds</td><td>2</td><td>PRO / Leica</td><td>25mm</td><td>25</td><td>25</td><td>Prime</td><td></td><td></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </details>
         </section>
 
         <section class="panel">
@@ -199,8 +211,8 @@
         <section class="panel compact">
           <div class="button-row">
             <button id="loadSampleBtn" class="btn">샘플 다시 불러오기</button>
-            <button id="exportJsonBtn" class="btn">데이터 백업</button>
-            <label class="btn file-btn">데이터 불러오기<input id="importJsonInput" type="file" accept="application/json" hidden /></label>
+            <button id="exportJsonBtn" class="btn">JSON 백업</button>
+            <label class="btn file-btn">JSON 불러오기<input id="importJsonInput" type="file" accept="application/json" hidden /></label>
             <button id="clearBtn" class="btn btn-danger">전체 삭제</button>
           </div>
         </section>

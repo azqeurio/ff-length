@@ -314,6 +314,41 @@ input[type="color"] {
   line-height: 1.45;
 }
 
+.example-box {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbfdff;
+  overflow: hidden;
+}
+
+.example-box summary {
+  padding: 10px 12px;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.example-table-wrap {
+  max-width: 100%;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+}
+
+.example-table {
+  min-width: 780px;
+  border: 0;
+  border-radius: 0;
+  font-size: 11px;
+}
+
+.example-table th,
+.example-table td {
+  padding: 8px 9px;
+  white-space: nowrap;
+}
+
 .preset-row { margin-top: 12px; }
 
 .chip {

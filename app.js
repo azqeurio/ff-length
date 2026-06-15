@@ -286,6 +286,7 @@ function renderChart() {
   }
 
   const rowH = 26;
+  const primeRowH = 25;
   const axisTop = 32;
   const plotTop = 78;
   const leftType = 92;
@@ -298,7 +299,7 @@ function renderChart() {
   let contentH = 0;
   rows.forEach(row => {
     if (row.type === "zoom") contentH += Math.max(188, row.items.length * rowH + 38);
-    else contentH += Math.max(128, Math.ceil(row.items.length / 4) * 64 + 26);
+    else contentH += Math.max(138, row.items.length * primeRowH + 44);
   });
 
   const height = Math.max(560, plotTop + contentH + footerH);
@@ -368,7 +369,7 @@ function renderChart() {
   rows.forEach(row => {
     const { type, items } = row;
     const isZoom = type === "zoom";
-    const blockH = isZoom ? Math.max(188, items.length * rowH + 38) : Math.max(128, Math.ceil(items.length / 4) * 64 + 26);
+    const blockH = isZoom ? Math.max(188, items.length * rowH + 38) : Math.max(138, items.length * primeRowH + 44);
     makeEl(svg, "rect", { x: plotLeft, y, width: plotRight - plotLeft, height: blockH, fill: "#FFFFFF", stroke: "#4B4B4B", "stroke-width": 1.4 });
     makeText(svg, { x: 51, y: y + blockH / 2 + 6, "font-size": 19, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, categoryLabel(type));
 
@@ -382,13 +383,16 @@ function renderChart() {
       const color = style.name.toLowerCase().includes("standard") ? "#9A9A9A" : "#1F1F1F";
 
       if (!isZoom) {
-        const lane = idx % 4;
-        const row = Math.floor(idx / 4);
-        const cy = y + 38 + row * 64 + lane * 15;
-        makeEl(svg, "rect", { x: startX - 4, y: cy - 25, width: 8, height: 8, fill: color });
-        makeEl(svg, "line", { x1: startX, y1: cy - 17, x2: startX, y2: cy - 3, stroke: "#9CA3AF", "stroke-width": 1 });
+        const cy = y + 31 + idx * primeRowH;
+        const labelW = textWidth(label, 82, 190, 6.1);
+        const labelRightX = startX + 12;
+        const labelFitsRight = labelRightX + labelW < plotRight - 8;
+        const labelX = labelFitsRight ? labelRightX : startX - 12;
+        const anchor = labelFitsRight ? "start" : "end";
+        makeEl(svg, "rect", { x: startX - 4, y: cy - 16, width: 8, height: 8, fill: color });
+        makeEl(svg, "line", { x1: startX, y1: cy - 8, x2: startX, y2: cy - 2, stroke: "#9CA3AF", "stroke-width": 1 });
         makeEl(svg, "circle", { cx: startX, cy, r: 4, fill: color });
-        makeText(svg, { x: startX, y: cy + 14, "font-size": 10.5, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, label);
+        makeText(svg, { x: labelX, y: cy + 4, "font-size": 10.8, "font-weight": 850, "text-anchor": anchor, fill: "#111111" }, label);
         return;
       }
 
