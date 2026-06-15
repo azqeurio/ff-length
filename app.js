@@ -289,8 +289,8 @@ function renderChart() {
   const primeRowH = 25;
   const axisTop = 32;
   const plotTop = 78;
-  const leftType = 92;
-  const leftChart = 156;
+  const leftType = 124;
+  const leftChart = 176;
   const right = 24;
   const width = 1280;
   const footerH = 34;
@@ -324,6 +324,7 @@ function renderChart() {
   const plotBottom = height - footerH - 8;
   const plotLeft = 30;
   const plotRight = width - right;
+  const labelColumnX = (plotLeft + leftType) / 2;
   const labelMode = $("labelMode")?.value || "both";
   const tickData = ticks.map(t => ({ t, px: leftChart + x(t) }));
   const labelGap = labelMode === "both" ? 64 : 58;
@@ -342,9 +343,9 @@ function renderChart() {
   });
   const labelTickSet = new Set(labeledTicks.map(item => item.t));
 
-  makeText(svg, { x: 50, y: axisTop + 4, "font-size": 12, "font-weight": 800, "text-anchor": "middle", fill: "#111827" }, labelMode === "equiv" ? "35mm equivalent" : "focal length");
+  makeText(svg, { x: labelColumnX, y: axisTop + 4, "font-size": 12, "font-weight": 800, "text-anchor": "middle", fill: "#111827" }, labelMode === "equiv" ? "35mm equivalent" : "focal length");
   if (labelMode === "both") {
-    makeText(svg, { x: 50, y: axisTop + 24, "font-size": 10, "font-weight": 700, "text-anchor": "middle", fill: "#111827" }, "(35mm equivalent)");
+    makeText(svg, { x: labelColumnX, y: axisTop + 24, "font-size": 10, "font-weight": 700, "text-anchor": "middle", fill: "#111827" }, "(35mm equivalent)");
   }
 
   ticks.forEach(t => {
@@ -371,7 +372,7 @@ function renderChart() {
     const isZoom = type === "zoom";
     const blockH = isZoom ? Math.max(188, items.length * rowH + 38) : Math.max(138, items.length * primeRowH + 44);
     makeEl(svg, "rect", { x: plotLeft, y, width: plotRight - plotLeft, height: blockH, fill: "#FFFFFF", stroke: "#4B4B4B", "stroke-width": 1.4 });
-    makeText(svg, { x: 51, y: y + blockH / 2 + 6, "font-size": 19, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, categoryLabel(type));
+    makeText(svg, { x: labelColumnX, y: y + blockH / 2 + 6, "font-size": 19, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, categoryLabel(type));
 
     items.forEach((lens, idx) => {
       const style = styleById(lens.styleId);
