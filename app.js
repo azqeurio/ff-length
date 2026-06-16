@@ -207,9 +207,83 @@ function scaleFactory(min, max, width) {
   return value => ((value - min) / (max - min)) * width;
 }
 
+const axisFitPresets = [7, 8, 10, 12, 14, 16, 20, 24, 28, 35, 40, 50, 70, 75, 85, 100, 135, 150, 200, 300, 400, 560, 600, 800, 1000, 1200, 1600, 2000, 2400, 3200];
+const axisTickPresets = [7, 12, 20, 40, 75, 100, 150, 300, 400, 800, 1000, 1200, 1600, 2000, 2400, 3200];
+
 function ticksFor(min, max) {
-  const base = [7, 12, 20, 40, 75, 100, 150, 300, 400, 800, 1000, 1200, 1600, 2000, 2400, 3200];
-  return base.filter(v => v >= min && v <= max);
+  return [...new Set([min, ...axisTickPresets.filter(v => v > min && v < max), max])]
+    .sort((a, b) => a - b);
+}
+
+function lensAxisValues() {
+  const values = [];
+  state.lenses.forEach(lens => {
+    const start = displayValue(lens, Number(lens.start));
+    const end = displayValue(lens, Number(lens.end));
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return;
+    values.push(start, end);
+    if ($("showTeleconverters")?.checked && lens.tc14) values.push(end * 1.4);
+    if ($("showTeleconverters")?.checked && lens.tc20) values.push(end * 2);
+  });
+  return values.filter(value => Number.isFinite(value) && value > 0);
+}
+
+function fittedAxisRange() {
+  const values = lensAxisValues();
+  if (!values.length) return null;
+
+  const minValue = Math.max(1, Math.min(...values));
+  const maxValue = Math.max(...values);
+  let lowerIndex = -1;
+  for (let i = axisFitPresets.length - 1; i >= 0; i -= 1) {
+    if (axisFitPresets[i] < minValue) {
+      lowerIndex = i;
+      break;
+    }
+  }
+  const upperIndex = axisFitPresets.findIndex(value => value > maxValue);
+  let lower = lowerIndex >= 0 ? axisFitPresets[lowerIndex] : axisFitPresets[0];
+  let upper = upperIndex >= 0 ? axisFitPresets[upperIndex] : Math.ceil(maxValue * 1.12);
+
+  if (lower >= upper) {
+    const nearestIndex = Math.max(0, axisFitPresets.findIndex(value => value >= minValue));
+    lower = axisFitPresets[Math.max(0, nearestIndex - 1)] || Math.max(1, Math.floor(minValue * .82));
+    upper = axisFitPresets[Math.min(axisFitPresets.length - 1, nearestIndex + 1)] || Math.ceil(maxValue * 1.18);
+  }
+
+  return { min: lower, max: upper };
+}
+
+function manualAxisRange() {
+  const min = Math.max(0.1, Number($("axisMin").value) || 10);
+  const max = Math.max(min + 1, Number($("axisMax").value) || 1600);
+  return { min, max };
+}
+
+function currentAxisRange() {
+  if ($("autoCropAxis")?.checked) {
+    return fittedAxisRange() || manualAxisRange();
+  }
+  return manualAxisRange();
+}
+
+function syncAxisControls() {
+  const autoCrop = $("autoCropAxis")?.checked;
+  const minInput = $("axisMin");
+  const maxInput = $("axisMax");
+  const fitButton = $("autoFitAxisBtn");
+
+  if (autoCrop) {
+    const fitted = fittedAxisRange();
+    if (fitted) {
+      minInput.value = fitted.min;
+      maxInput.value = fitted.max;
+    }
+  }
+
+  minInput.disabled = !!autoCrop;
+  maxInput.disabled = !!autoCrop;
+  if (fitButton) fitButton.disabled = !!autoCrop || !state.lenses.length;
 }
 
 function makeEl(svg, tag, attrs) {
@@ -316,8 +390,10 @@ function renderChart() {
   $("liveTitle").textContent = title;
   $("liveDesc").textContent = `${modeText} · 상단 축 ${labelModeText()} · ${scaleText}`;
 
-  const min = Math.max(0.1, Number($("axisMin").value) || 10);
-  const max = Math.max(min + 1, Number($("axisMax").value) || 1600);
+  syncAxisControls();
+  const axisRange = currentAxisRange();
+  const min = axisRange.min;
+  const max = axisRange.max;
   const chartW = width - leftChart - right;
   const x = scaleFactory(min, max, chartW);
   const ticks = ticksFor(min, max);
@@ -830,23 +906,14 @@ function autoFitAxis() {
     return;
   }
 
-  const values = [];
-  state.lenses.forEach(lens => {
-    const start = displayValue(lens, Number(lens.start));
-    const end = displayValue(lens, Number(lens.end));
-    values.push(start, end);
-    if ($("showTeleconverters").checked && lens.tc14) values.push(end * 1.4);
-    if ($("showTeleconverters").checked && lens.tc20) values.push(end * 2);
-  });
+  const fitted = fittedAxisRange();
+  if (!fitted) {
+    toast("축에 맞출 렌즈가 없습니다.");
+    return;
+  }
 
-  const minValue = Math.max(1, Math.min(...values));
-  const maxValue = Math.max(...values);
-  const presets = [7, 8, 10, 12, 14, 16, 20, 24, 28, 35, 40, 50, 70, 85, 100, 135, 150, 200, 300, 400, 560, 600, 800, 1000, 1200, 1600, 2000, 2400, 3200];
-  const lower = [...presets].reverse().find(v => v <= minValue * .88) || Math.max(1, Math.floor(minValue * .8));
-  const upper = presets.find(v => v >= maxValue * 1.08) || Math.ceil(maxValue * 1.15);
-
-  $("axisMin").value = lower;
-  $("axisMax").value = upper;
+  $("axisMin").value = fitted.min;
+  $("axisMax").value = fitted.max;
   renderChart();
   toast("현재 렌즈 범위에 맞춰 축을 조정했습니다.");
 }
@@ -931,6 +998,7 @@ function exportJson() {
       displayMode: $("displayMode").value,
       labelMode: $("labelMode").value,
       scaleMode: $("scaleMode").value,
+      autoCropAxis: $("autoCropAxis").checked,
       axisMin: Number($("axisMin").value),
       axisMax: Number($("axisMax").value),
       showTeleconverters: $("showTeleconverters").checked,
@@ -967,6 +1035,7 @@ function importJson(file) {
         $("displayMode").value = data.settings.displayMode || "equiv";
         $("labelMode").value = data.settings.labelMode || "equiv";
         $("scaleMode").value = data.settings.scaleMode || "log";
+        $("autoCropAxis").checked = data.settings.autoCropAxis ?? true;
         $("axisMin").value = data.settings.axisMin || 14;
         $("axisMax").value = data.settings.axisMax || 1600;
         $("showTeleconverters").checked = data.settings.showTeleconverters ?? true;
@@ -1240,7 +1309,7 @@ function bind() {
     renderAll();
   });
 
-  ["displayMode", "labelMode", "scaleMode", "chartTitle", "axisMin", "axisMax", "showTeleconverters", "showZoomGuides"].forEach(id => {
+  ["displayMode", "labelMode", "scaleMode", "chartTitle", "autoCropAxis", "axisMin", "axisMax", "showTeleconverters", "showZoomGuides"].forEach(id => {
     $(id).addEventListener("input", () => {
       renderChart();
       updateLensPreview();

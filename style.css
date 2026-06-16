@@ -230,6 +230,13 @@ select {
 
 input::placeholder { color: var(--subtle); }
 
+input:disabled,
+select:disabled {
+  cursor: not-allowed;
+  color: var(--muted);
+  background: #f1f5f9;
+}
+
 input:focus,
 select:focus {
   border-color: rgba(37, 99, 235, .82);
