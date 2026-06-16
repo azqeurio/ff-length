@@ -357,6 +357,49 @@ function parseFocalRange(text) {
   return null;
 }
 
+function teleconverterFactorFromText(text) {
+  const source = String(text || "");
+  if (!source.includes("+")) return 1;
+  const tail = source.split("+").slice(1).join(" ").toLowerCase();
+  if (!tail.trim()) return 1;
+
+  const explicit = tail.match(/(\d+(?:\.\d+)?)\s*x\b/);
+  if (explicit) {
+    const factor = Number(explicit[1]);
+    if (factor > 1 && factor <= 3) return Math.round(factor * 100) / 100;
+  }
+
+  const code = tail.match(/\b(?:mc|tc|ec|teleconverter|converter)[\s_-]*(\d{2,3})\b/);
+  if (code) {
+    const raw = code[1];
+    if (raw === "14") return 1.4;
+    if (raw === "20") return 2;
+    if (raw === "25" || raw === "125") return 1.25;
+    const parsed = Number(raw) / (raw.length === 2 ? 10 : 100);
+    if (parsed > 1 && parsed <= 3) return Math.round(parsed * 100) / 100;
+  }
+
+  if (/\b1\.4\b|\b14\b/.test(tail)) return 1.4;
+  if (/\b2(?:\.0)?\b|\b20\b/.test(tail)) return 2;
+  if (/\b1\.25\b|\b125\b/.test(tail)) return 1.25;
+  return /\b(?:mc|tc|ec|teleconverter|converter)\b/.test(tail) ? 1.4 : 1;
+}
+
+function applyTeleconverterRange(range, factor) {
+  if (!range || !factor || factor <= 1) return range;
+  return {
+    ...range,
+    start: Math.round(Number(range.start) * factor * 10) / 10,
+    end: Math.round(Number(range.end) * factor * 10) / 10,
+    teleconverterFactor: factor
+  };
+}
+
+function focalRangeWithTeleconverter(text) {
+  const range = parseFocalRange(text);
+  return applyTeleconverterRange(range, teleconverterFactorFromText(text));
+}
+
 function scaleFactory(min, max, width) {
   if ($("scaleMode").value === "log") {
     const a = Math.log(min);
@@ -509,6 +552,8 @@ function normalizeLensLookupName(name) {
 }
 
 function statsFocalRange(stats) {
+  const parsed = focalRangeWithTeleconverter(stats?.lensName);
+  if (parsed) return parsed;
   if (stats?.lensMin && stats?.lensMax) return { start: stats.lensMin, end: stats.lensMax };
   if (!stats?.focalCounts) return null;
   const focals = Object.keys(stats.focalCounts).map(Number).filter(value => Number.isFinite(value));
@@ -582,8 +627,17 @@ function activeTeleconverters() {
 function focalEntriesForLens(lens, stats) {
   const start = Number(lens.start);
   const end = Number(lens.end);
+  const factor = Number(stats?.teleconverterFactor) || teleconverterFactorFromText(stats?.lensName);
+  const baseRange = parseFocalRange(stats?.lensName);
+  const shouldAdjustLegacyTc = factor > 1 && !stats?.teleconverterApplied && baseRange;
   return Object.entries(stats?.focalCounts || {})
-    .map(([focal, count]) => ({ focal: Number(focal), count: Number(count) || 0 }))
+    .map(([focal, count]) => {
+      const rawFocal = Number(focal);
+      const adjustedFocal = shouldAdjustLegacyTc && rawFocal >= baseRange.start - .5 && rawFocal <= baseRange.end + .5
+        ? Math.round(rawFocal * factor * 10) / 10
+        : rawFocal;
+      return { focal: adjustedFocal, count: Number(count) || 0 };
+    })
     .filter(item => Number.isFinite(item.focal) && item.count > 0 && item.focal >= start - .5 && item.focal <= end + .5)
     .sort((a, b) => a.focal - b.focal);
 }
@@ -634,7 +688,7 @@ function applyExifStatsToRoadmap(options = {}) {
   let skipped = 0;
 
   lenses.forEach(stats => {
-    const parsedRange = parseFocalRange(stats.lensName);
+    const parsedRange = focalRangeWithTeleconverter(stats.lensName);
     const rawStart = parsedRange?.start ?? stats.lensMin ?? stats.focalMin;
     const rawEnd = parsedRange?.end ?? stats.lensMax ?? stats.focalMax;
     if (!rawStart || !rawEnd || /^unknown lens$/i.test(stats.lensName || "")) {
@@ -819,7 +873,7 @@ function renderChart() {
       const end = Math.max(displayValue(lens, Number(lens.start)), displayValue(lens, Number(lens.end)));
       const startX = clamp(leftChart + x(start), leftChart, leftChart + chartW);
       const endX = clamp(leftChart + x(end), leftChart, leftChart + chartW);
-      const label = shortText(chartLensName(lens.name), isZoom ? 46 : 24);
+      const label = isZoom ? shortText(chartLensName(lens.name), 46) : chartLensName(lens.name);
       const color = normalizeHexColor(style.color, visual.rangeFallbackColor);
       const cy = isZoom ? y + 33 + idx * rowH : y + 31 + idx * primeRowH;
       const exifStats = roadmapExifStatsForLens(lens);
@@ -839,7 +893,7 @@ function renderChart() {
     plottedItems.forEach(item => {
       const { lens, style, startX, endX, label, color, cy, end, exifStats } = item;
       if (!isZoom) {
-        const labelW = textWidth(label, 82, 190, 6.1);
+        const labelW = textWidth(label, 82, 560, 6.1);
         const labelRightX = startX + 12;
         const labelFitsRight = labelRightX + labelW < plotRight - 8;
         const labelX = labelFitsRight ? labelRightX : startX - 12;
@@ -1452,7 +1506,7 @@ function clearExifCache() {
   }
   if (!confirm("이 브라우저에 저장된 EXIF 분석 캐시를 삭제할까요? 사진 파일은 건드리지 않습니다.")) return;
 
-  const dbNames = ["lensRoadmapExifCacheV2", "lensRoadmapExifCacheV1"];
+  const dbNames = ["lensRoadmapExifCacheV4", "lensRoadmapExifCacheV3", "lensRoadmapExifCacheV2", "lensRoadmapExifCacheV1"];
   let done = 0;
   let failed = false;
   const finish = () => {
@@ -1667,7 +1721,7 @@ function deleteStyle(id) {
 }
 
 function applyParsedFocal(force = false) {
-  const parsed = parseFocalRange($("lensName").value);
+  const parsed = focalRangeWithTeleconverter($("lensName").value);
   if (!parsed) {
     if (force) toast("렌즈 이름에서 mm 값을 찾지 못했습니다.");
     return false;
@@ -2014,7 +2068,7 @@ function lensFromSheetRow(row) {
   const focalText = sheetValue(row, "focal");
   let start = sheetNumber(sheetValue(row, "start"));
   let end = sheetNumber(sheetValue(row, "end"));
-  const parsed = parseFocalRange(focalText) || parseFocalRange(name);
+  const parsed = parseFocalRange(focalText) || focalRangeWithTeleconverter(name);
 
   if (!start && parsed) start = parsed.start;
   if (!end && parsed) end = parsed.end;
