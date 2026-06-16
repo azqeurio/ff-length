@@ -895,21 +895,7 @@ function renderChart() {
   }
   if (roadmapExifEnabled()) {
     const heatX = plotLeft + 300;
-    const legendGradient = makeEl(defs, "linearGradient", {
-      id: "heat-legend-gradient",
-      gradientUnits: "userSpaceOnUse",
-      x1: heatX,
-      y1: legendY - 4,
-      x2: heatX + 58,
-      y2: legendY - 4
-    });
-    [0, 20, 40, 60, 80, 100].forEach(step => {
-      makeEl(legendGradient, "stop", {
-        offset: `${step}%`,
-        "stop-color": heatColor(step, 100)
-      });
-    });
-    makeEl(svg, "line", { x1: heatX, y1: legendY - 4, x2: heatX + 58, y2: legendY - 4, stroke: "url(#heat-legend-gradient)", "stroke-width": 5, "stroke-linecap": "round" });
+    drawHeatLegend(svg, heatX, legendY - 4, 58, 5);
     makeText(svg, { x: heatX + 68, y: legendY, "font-size": 11, "font-weight": 850, fill: visual.chartTextColor }, "EXIF heatmap low → high");
   }
   state.styles.forEach(style => {
@@ -927,6 +913,39 @@ function drawTc(svg, leftChart, chartW, x, startX, y, tcEnd, max, color, dash, l
   if (label) makeText(svg, { x: tcX + 8, y: y + 4, "font-size": 10, "font-weight": 800, fill: "#64748B" }, label);
 }
 
+function drawHeatLegend(svg, x, y, width, strokeWidth) {
+  const segments = 40;
+  for (let index = 0; index < segments; index += 1) {
+    const x1 = x + (width * index) / segments;
+    const x2 = x + (width * (index + 1)) / segments + .15;
+    const count = ((index + .5) / segments) * 100;
+    makeEl(svg, "line", {
+      x1,
+      y1: y,
+      x2,
+      y2: y,
+      stroke: heatColor(count, 100),
+      "stroke-width": strokeWidth,
+      "stroke-linecap": index === 0 || index === segments - 1 ? "round" : "butt"
+    });
+  }
+}
+
+function interpolateHeatCount(offset, stops) {
+  if (!stops.length) return 0;
+  if (offset <= stops[0].offset) return stops[0].count;
+  for (let index = 1; index < stops.length; index += 1) {
+    const prev = stops[index - 1];
+    const next = stops[index];
+    if (offset <= next.offset) {
+      const span = Math.max(.001, next.offset - prev.offset);
+      const ratio = (offset - prev.offset) / span;
+      return prev.count + (next.count - prev.count) * ratio;
+    }
+  }
+  return stops[stops.length - 1].count;
+}
+
 function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatMax) {
   const entries = focalEntriesForLens(item.lens, stats);
   if (!entries.length) return false;
@@ -941,39 +960,21 @@ function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatM
 
   const maxCount = Math.max(1, Number(heatMax) || heatMaxForResult());
   const width = Math.max(6, Number(item.style.width) + 3);
-  const gradientId = `heat-${String(item.lens.id || uid()).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-  const gradient = makeEl(defs, "linearGradient", {
-    id: gradientId,
-    gradientUnits: "userSpaceOnUse",
-    x1: lineStart,
-    y1: item.cy,
-    x2: lineEnd,
-    y2: item.cy
-  });
-
   const stops = entries
     .map(entry => {
       const px = clamp(leftChart + x(displayValue(item.lens, entry.focal)), lineStart, lineEnd);
       return {
         offset: clamp(((px - lineStart) / lineW) * 100, 0, 100),
-        color: heatColor(entry.count, maxCount)
+        count: entry.count
       };
     })
     .sort((a, b) => a.offset - b.offset);
 
   if (!stops.length) return false;
-  if (entries[0].focal > lensStart + .2) stops.unshift({ offset: 0, color: heatColor(0, maxCount) });
-  else if (stops[0].offset > 0) stops.unshift({ offset: 0, color: stops[0].color });
-  if (entries[entries.length - 1].focal < lensEnd - .2) stops.push({ offset: 100, color: heatColor(0, maxCount) });
-  else if (stops[stops.length - 1].offset < 100) stops.push({ offset: 100, color: stops[stops.length - 1].color });
-
-  stops.forEach(stop => {
-    makeEl(gradient, "stop", {
-      offset: `${clean(stop.offset)}%`,
-      "stop-color": stop.color,
-      "stop-opacity": .98
-    });
-  });
+  if (entries[0].focal > lensStart + .2) stops.unshift({ offset: 0, count: 0 });
+  else if (stops[0].offset > 0) stops.unshift({ offset: 0, count: stops[0].count });
+  if (entries[entries.length - 1].focal < lensEnd - .2) stops.push({ offset: 100, count: 0 });
+  else if (stops[stops.length - 1].offset < 100) stops.push({ offset: 100, count: stops[stops.length - 1].count });
 
   makeEl(svg, "line", {
     x1: lineStart,
@@ -985,15 +986,24 @@ function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatM
     "stroke-linecap": "butt",
     opacity: .72
   });
-  makeEl(svg, "line", {
-    x1: lineStart,
-    y1: item.cy,
-    x2: lineEnd,
-    y2: item.cy,
-    stroke: `url(#${gradientId})`,
-    "stroke-width": width,
-    "stroke-linecap": "butt"
-  });
+
+  const segments = Math.max(24, Math.min(160, Math.round(lineW / 7)));
+  for (let index = 0; index < segments; index += 1) {
+    const offset1 = (index / segments) * 100;
+    const offset2 = ((index + 1) / segments) * 100;
+    const midOffset = (offset1 + offset2) / 2;
+    const x1 = lineStart + (lineW * offset1) / 100;
+    const x2 = lineStart + (lineW * offset2) / 100 + .2;
+    makeEl(svg, "line", {
+      x1,
+      y1: item.cy,
+      x2,
+      y2: item.cy,
+      stroke: heatColor(interpolateHeatCount(midOffset, stops), maxCount),
+      "stroke-width": width,
+      "stroke-linecap": "butt"
+    });
+  }
 
   return true;
 }
