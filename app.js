@@ -703,13 +703,23 @@ function heatRatio(count, max, minVisible = 0) {
   const value = Number(count) || 0;
   if (value <= 0) return 0;
   const baseRatio = clamp(value / Math.max(1, Number(max) || 1), 0, 1);
-  const emphasized = Math.pow(baseRatio, .44);
+  const lifted = Math.pow(baseRatio, .62);
+  const peakBoost = baseRatio > .28 ? (baseRatio - .28) * .28 : 0;
+  const emphasized = clamp(lifted + peakBoost, 0, 1);
   return Math.max(emphasized, minVisible);
 }
 
 function heatColor(count, max, minVisible = 0) {
   const settings = currentVisualSettings();
   return mixColor(settings.heatLowColor, settings.heatHighColor, heatRatio(count, max, minVisible));
+}
+
+function heatColorWithCutoff(count, max, cutoff = .1) {
+  const settings = currentVisualSettings();
+  const ratio = heatRatio(count, max, 0);
+  if (ratio < cutoff) return settings.heatLowColor;
+  const compressed = Math.pow(clamp((ratio - cutoff) / (1 - cutoff), 0, 1), .68);
+  return mixColor(settings.heatLowColor, settings.heatHighColor, compressed);
 }
 
 function activeTeleconverters() {
@@ -996,7 +1006,7 @@ function renderChart() {
         const anchor = labelFitsRight ? "start" : "end";
         const maskX = anchor === "start" ? labelX - 3 : labelX - labelW - 3;
         const redraw = () => {
-          const primeColor = exifStats ? heatColor(exifStats.total, heatMaxForResult()) : color;
+          const primeColor = exifStats ? heatColor(exifStats.total, heatMaxForResult(), .06) : color;
           makeEl(svg, "circle", { cx: startX, cy, r: exifStats ? 5.7 : 4.5, fill: primeColor, stroke: exifStats ? visual.chartBackgroundColor : "", "stroke-width": exifStats ? 1.5 : "" });
           makeEl(svg, "rect", { x: maskX, y: cy - 9, width: labelW + 6, height: 15, fill: visual.plotBackgroundColor });
           makeText(svg, { x: labelX, y: cy + 4, "font-size": 10.8, "font-weight": 850, "text-anchor": anchor, fill: visual.chartTextColor }, label);
@@ -1077,7 +1087,7 @@ function drawHeatLegend(svg, x, y, width, strokeWidth) {
       y1: y,
       x2,
       y2: y,
-      stroke: heatColor(count, 100),
+      stroke: heatColorWithCutoff(count, 100, .11),
       "stroke-width": strokeWidth,
       "stroke-linecap": index === 0 || index === segments - 1 ? "round" : "butt"
     });
@@ -1115,7 +1125,7 @@ function drawZoomFallbackHeatLine(svg, item, stats, heatMax) {
   const lineEnd = Math.max(item.startX, item.endX);
   if (lineEnd <= lineStart + 1) return;
   const width = Math.max(7, Number(item.style.width) + 5);
-  const color = heatColor(stats?.total || 0, heatMax, .16);
+  const color = heatColor(stats?.total || 0, heatMax, .08);
   makeEl(svg, "line", {
     x1: lineStart,
     y1: item.cy,
@@ -1163,14 +1173,14 @@ function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatM
     y1: item.cy,
     x2: lineEnd,
     y2: item.cy,
-    stroke: heatColor(Math.max(maxCount * .008, (stats?.total || 0) * .012), maxCount, .07),
+    stroke: heatColor(0, maxCount),
     "stroke-width": width + 1.5,
     "stroke-linecap": "butt",
-    opacity: .95
+    opacity: .75
   });
 
   const segments = Math.max(180, Math.min(900, Math.ceil(lineW / 1.35)));
-  const sigma = clamp(100 / Math.max(10, measuredStops.length * 1.65), 3.8, 9.5);
+  const sigma = clamp(100 / Math.max(48, measuredStops.length * 5.8), .95, 2.15);
   for (let index = 0; index < segments; index += 1) {
     const offset1 = (index / segments) * 100;
     const offset2 = ((index + 1) / segments) * 100;
@@ -1182,7 +1192,7 @@ function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatM
       y1: item.cy,
       x2,
       y2: item.cy,
-      stroke: heatColor(smoothedHeatCount(midOffset, measuredStops, sigma), maxCount, .1),
+      stroke: heatColorWithCutoff(smoothedHeatCount(midOffset, measuredStops, sigma), maxCount, .18),
       "stroke-width": width,
       "stroke-linecap": "butt"
     });
