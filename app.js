@@ -325,12 +325,34 @@ function textWidth(text, min = 84, max = 360, px = 7.1) {
 }
 
 function parseFocalRange(text) {
-  const normalized = String(text || "").replace(/\u2013|\u2014/g, "-");
-  const zoom = normalized.match(/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*mm/i);
-  if (zoom) return { start: Number(zoom[1]), end: Number(zoom[2]), type: "zoom" };
+  const normalized = String(text || "")
+    .replace(/\u2013|\u2014|~|〜|～/g, "-")
+    .replace(/ｍｍ/gi, "mm")
+    .replace(/\s+/g, " ")
+    .trim();
+  const zoomPatterns = [
+    /(\d+(?:\.\d+)?)\s*mm\s*-\s*(\d+(?:\.\d+)?)\s*mm/i,
+    /(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*mm/i,
+    /(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)(?=\s*\/)/i,
+    /(?:^|[^\d.f])(\d{1,4}(?:\.\d+)?)\s*-\s*(\d{1,4}(?:\.\d+)?)(?=\s+(?:f|t|g|s|o|i|d|v|r|l|is|oss|ois|vr|pro|art|stm|usm|gm|dn|dc|dg)\b)/i
+  ];
+
+  for (const pattern of zoomPatterns) {
+    const zoom = normalized.match(pattern);
+    if (!zoom) continue;
+    const start = Number(zoom[1]);
+    const end = Number(zoom[2]);
+    if (start >= 1 && end > start && end <= 3000) return { start, end, type: "zoom" };
+  }
 
   const prime = normalized.match(/(\d+(?:\.\d+)?)\s*mm/i);
   if (prime) return { start: Number(prime[1]), end: Number(prime[1]), type: "prime" };
+
+  const slashPrime = normalized.match(/\/\s*(\d{1,4}(?:\.\d+)?)(?=\s*(?:$|[a-z]|[-)]))/i);
+  if (slashPrime) {
+    const focal = Number(slashPrime[1]);
+    if (focal >= 4 && focal <= 3000) return { start: focal, end: focal, type: "prime" };
+  }
 
   return null;
 }
@@ -487,6 +509,7 @@ function normalizeLensLookupName(name) {
 }
 
 function statsFocalRange(stats) {
+  if (stats?.lensMin && stats?.lensMax) return { start: stats.lensMin, end: stats.lensMax };
   if (!stats?.focalCounts) return null;
   const focals = Object.keys(stats.focalCounts).map(Number).filter(value => Number.isFinite(value));
   if (!focals.length) return null;
@@ -612,8 +635,8 @@ function applyExifStatsToRoadmap(options = {}) {
 
   lenses.forEach(stats => {
     const parsedRange = parseFocalRange(stats.lensName);
-    const rawStart = parsedRange?.start ?? stats.focalMin;
-    const rawEnd = parsedRange?.end ?? stats.focalMax;
+    const rawStart = parsedRange?.start ?? stats.lensMin ?? stats.focalMin;
+    const rawEnd = parsedRange?.end ?? stats.lensMax ?? stats.focalMax;
     if (!rawStart || !rawEnd || /^unknown lens$/i.test(stats.lensName || "")) {
       skipped += 1;
       return;
@@ -872,9 +895,22 @@ function renderChart() {
   }
   if (roadmapExifEnabled()) {
     const heatX = plotLeft + 300;
-    makeEl(svg, "line", { x1: heatX, y1: legendY - 4, x2: heatX + 26, y2: legendY - 4, stroke: heatColor(0, 10), "stroke-width": 5, "stroke-linecap": "butt" });
-    makeEl(svg, "line", { x1: heatX + 26, y1: legendY - 4, x2: heatX + 52, y2: legendY - 4, stroke: heatColor(10, 10), "stroke-width": 5, "stroke-linecap": "butt" });
-    makeText(svg, { x: heatX + 60, y: legendY, "font-size": 11, "font-weight": 850, fill: visual.chartTextColor }, "EXIF heatmap low → high");
+    const legendGradient = makeEl(defs, "linearGradient", {
+      id: "heat-legend-gradient",
+      gradientUnits: "userSpaceOnUse",
+      x1: heatX,
+      y1: legendY - 4,
+      x2: heatX + 58,
+      y2: legendY - 4
+    });
+    [0, 20, 40, 60, 80, 100].forEach(step => {
+      makeEl(legendGradient, "stop", {
+        offset: `${step}%`,
+        "stop-color": heatColor(step, 100)
+      });
+    });
+    makeEl(svg, "line", { x1: heatX, y1: legendY - 4, x2: heatX + 58, y2: legendY - 4, stroke: "url(#heat-legend-gradient)", "stroke-width": 5, "stroke-linecap": "round" });
+    makeText(svg, { x: heatX + 68, y: legendY, "font-size": 11, "font-weight": 850, fill: visual.chartTextColor }, "EXIF heatmap low → high");
   }
   state.styles.forEach(style => {
     const color = normalizeHexColor(style.color, visual.rangeFallbackColor);
@@ -1406,8 +1442,10 @@ function clearExifCache() {
   }
   if (!confirm("이 브라우저에 저장된 EXIF 분석 캐시를 삭제할까요? 사진 파일은 건드리지 않습니다.")) return;
 
-  const request = indexedDB.deleteDatabase("lensRoadmapExifCacheV1");
-  request.onsuccess = () => {
+  const dbNames = ["lensRoadmapExifCacheV2", "lensRoadmapExifCacheV1"];
+  let done = 0;
+  let failed = false;
+  const finish = () => {
     exifAnalysis.summary.cacheHits = 0;
     exifAnalysis.result = emptyExifResult();
     saveStoredExifResult(exifAnalysis.result);
@@ -1415,13 +1453,22 @@ function clearExifCache() {
     renderAll();
     toast("EXIF 캐시를 초기화했습니다.");
   };
-  request.onerror = () => {
-    alert("EXIF 캐시를 초기화하지 못했습니다. 브라우저 저장소 권한을 확인해 주세요.");
-  };
-  request.onblocked = () => {
-    exifAnalysis.status = "캐시 초기화가 대기 중입니다. 다른 탭에서 이 앱을 닫은 뒤 다시 시도해 주세요.";
-    renderExifAnalysis();
-  };
+
+  dbNames.forEach(name => {
+    const request = indexedDB.deleteDatabase(name);
+    request.onsuccess = () => {
+      done += 1;
+      if (done === dbNames.length && !failed) finish();
+    };
+    request.onerror = () => {
+      failed = true;
+      alert("EXIF 캐시를 초기화하지 못했습니다. 브라우저 저장소 권한을 확인해 주세요.");
+    };
+    request.onblocked = () => {
+      exifAnalysis.status = "캐시 초기화가 대기 중입니다. 다른 탭에서 이 앱을 닫은 뒤 다시 시도해 주세요.";
+      renderExifAnalysis();
+    };
+  });
 }
 
 function renderTables() {
@@ -1735,9 +1782,11 @@ function chartSvgBlobUrl() {
 }
 
 function exportImage(format) {
+  renderChart();
   const mime = format === "webp" ? "image/webp" : format === "jpg" ? "image/jpeg" : "image/png";
   const extension = format === "webp" ? "webp" : format === "jpg" ? "jpg" : "png";
   const url = chartSvgBlobUrl();
+  const visual = currentVisualSettings();
   const img = new Image();
   img.onload = () => {
     const vb = $("chart").viewBox.baseVal;
@@ -1751,7 +1800,7 @@ function exportImage(format) {
       alert("이미지를 생성할 수 없습니다. 브라우저를 새로고침한 뒤 다시 시도해 주세요.");
       return;
     }
-    ctx.fillStyle = "#fff";
+    ctx.fillStyle = visual.chartBackgroundColor;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     URL.revokeObjectURL(url);

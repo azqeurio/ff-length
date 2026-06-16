@@ -1,6 +1,6 @@
 importScripts("vendor/dexie.min.js", "vendor/exifr.full.umd.js");
 
-const DB_NAME = "lensRoadmapExifCacheV1";
+const DB_NAME = "lensRoadmapExifCacheV2";
 const BATCH_SIZE = 96;
 const UNKNOWN_LENS = "Unknown lens";
 const EXIF_PICK = [
@@ -8,17 +8,26 @@ const EXIF_PICK = [
   "Lens",
   "LensID",
   "LensType",
+  "LensInfo",
+  "LensSpec",
+  "LensSpecification",
+  "LensFocalLength",
+  "MinFocalLength",
+  "MaxFocalLength",
   "FocalLength",
   "FocalLengthIn35mmFormat",
   "FocalLengthIn35mmFilm",
-  "FocalLength35efl"
+  "FocalLength35efl",
+  "FocalLength35mm",
+  "FocalLenIn35mmFilm",
+  "DigitalZoomRatio"
 ];
 
 let cancelled = false;
 
 const db = new Dexie(DB_NAME);
 db.version(1).stores({
-  photos: "&cacheKey,path,size,lastModified,lensName,focalLength,focalLength35mm,parsedAt"
+  photos: "&cacheKey,path,size,lastModified,lensName,focalLength,focalLength35mm,lensMin,lensMax,parsedAt"
 });
 
 function roundFocal(value) {
@@ -36,6 +45,10 @@ function formatFocal(value) {
 function numericValue(value) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (Array.isArray(value)) {
+    if (value.length === 2 && value.every(item => typeof item === "number" && Number.isFinite(item)) && value[1] !== 0) {
+      const ratio = value[0] / value[1];
+      if (Number.isFinite(ratio) && ratio > 0 && ratio < 10000) return ratio;
+    }
     for (const item of value) {
       const number = numericValue(item);
       if (number) return number;
@@ -51,6 +64,19 @@ function numericValue(value) {
   }
   const match = String(value || "").replace(",", ".").match(/(\d+(?:\.\d+)?)/);
   return match ? Number(match[1]) : null;
+}
+
+function numericValues(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return [value];
+  if (Array.isArray(value)) return value.flatMap(numericValues);
+  if (value && typeof value === "object") {
+    if (Number.isFinite(value.numerator) && Number.isFinite(value.denominator) && value.denominator !== 0) {
+      return [value.numerator / value.denominator];
+    }
+    if ("value" in value) return numericValues(value.value);
+    if ("description" in value) return numericValues(value.description);
+  }
+  return [...String(value || "").replace(/,/g, ".").matchAll(/\d+(?:\.\d+)?/g)].map(match => Number(match[0]));
 }
 
 function textValue(value) {
@@ -78,7 +104,61 @@ function lensNameFrom(tags = {}) {
 function focal35From(tags = {}) {
   return numericValue(tags.FocalLengthIn35mmFormat)
     || numericValue(tags.FocalLengthIn35mmFilm)
-    || numericValue(tags.FocalLength35efl);
+    || numericValue(tags.FocalLength35efl)
+    || numericValue(tags.FocalLength35mm)
+    || numericValue(tags.FocalLenIn35mmFilm);
+}
+
+function focalRangeFromText(text) {
+  const normalized = String(text || "")
+    .replace(/\u2013|\u2014|~|〜|～/g, "-")
+    .replace(/ｍｍ/gi, "mm")
+    .replace(/\s+/g, " ")
+    .trim();
+  const patterns = [
+    /(\d+(?:\.\d+)?)\s*mm\s*-\s*(\d+(?:\.\d+)?)\s*mm/i,
+    /(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*mm/i,
+    /(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)(?=\s*\/)/i,
+    /(?:^|[^\d.f])(\d{1,4}(?:\.\d+)?)\s*-\s*(\d{1,4}(?:\.\d+)?)(?=\s+(?:f|t|g|s|o|i|d|v|r|l|is|oss|ois|vr|pro|art|stm|usm|gm|dn|dc|dg)\b)/i
+  ];
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (!match) continue;
+    const start = Number(match[1]);
+    const end = Number(match[2]);
+    if (start >= 1 && end > start && end <= 3000) return { start, end };
+  }
+
+  const prime = normalized.match(/(\d+(?:\.\d+)?)\s*mm/i) || normalized.match(/\/\s*(\d{1,4}(?:\.\d+)?)(?=\s*(?:$|[a-z]|[-)]))/i);
+  if (prime) {
+    const focal = Number(prime[1]);
+    if (focal >= 4 && focal <= 3000) return { start: focal, end: focal };
+  }
+  return null;
+}
+
+function focalRangeFromTags(tags = {}, lensName = "") {
+  const directMin = roundFocal(numericValue(tags.MinFocalLength));
+  const directMax = roundFocal(numericValue(tags.MaxFocalLength));
+  if (directMin && directMax) return { start: Math.min(directMin, directMax), end: Math.max(directMin, directMax) };
+
+  const textRange = focalRangeFromText(lensName)
+    || focalRangeFromText(textValue(tags.LensInfo))
+    || focalRangeFromText(textValue(tags.LensSpecification))
+    || focalRangeFromText(textValue(tags.LensSpec))
+    || focalRangeFromText(textValue(tags.LensType));
+  if (textRange) return textRange;
+
+  const candidates = [tags.LensInfo, tags.LensSpecification, tags.LensSpec, tags.LensFocalLength]
+    .flatMap(numericValues)
+    .map(roundFocal)
+    .filter(value => value && value >= 4 && value <= 3000);
+  if (candidates.length >= 2) {
+    const start = Math.min(candidates[0], candidates[1]);
+    const end = Math.max(candidates[0], candidates[1]);
+    if (end > start) return { start, end };
+  }
+  return null;
 }
 
 function entryFile(entry) {
@@ -110,6 +190,8 @@ async function parsePhoto(entry) {
     lensName: UNKNOWN_LENS,
     focalLength: null,
     focalLength35mm: null,
+    lensMin: null,
+    lensMax: null,
     parsedAt: Date.now(),
     error: ""
   };
@@ -134,11 +216,17 @@ async function parsePhoto(entry) {
       pick: EXIF_PICK
     });
 
+    const lensName = lensNameFrom(tags);
+    const lensRange = focalRangeFromTags(tags, lensName);
+    const directFocal = roundFocal(numericValue(tags?.FocalLength));
+    const fallbackPrimeFocal = lensRange && Math.abs(lensRange.start - lensRange.end) < 0.05 ? roundFocal(lensRange.start) : null;
     return {
       ...base,
-      lensName: lensNameFrom(tags),
-      focalLength: roundFocal(numericValue(tags?.FocalLength)),
-      focalLength35mm: roundFocal(focal35From(tags))
+      lensName,
+      focalLength: directFocal || fallbackPrimeFocal,
+      focalLength35mm: roundFocal(focal35From(tags)),
+      lensMin: lensRange ? roundFocal(lensRange.start) : null,
+      lensMax: lensRange ? roundFocal(lensRange.end) : null
     };
   } catch (error) {
     return {
@@ -161,6 +249,8 @@ function addToGroup(groups, record) {
       equivCounts: new Map(),
       focalMin: null,
       focalMax: null,
+      lensMin: null,
+      lensMax: null,
       equivMin: null,
       equivMax: null,
       cropSum: 0,
@@ -177,6 +267,11 @@ function addToGroup(groups, record) {
     group.focalCounts.set(key, (group.focalCounts.get(key) || 0) + 1);
     group.focalMin = group.focalMin === null ? record.focalLength : Math.min(group.focalMin, record.focalLength);
     group.focalMax = group.focalMax === null ? record.focalLength : Math.max(group.focalMax, record.focalLength);
+  }
+
+  if (record.lensMin && record.lensMax) {
+    group.lensMin = group.lensMin === null ? record.lensMin : Math.min(group.lensMin, record.lensMin);
+    group.lensMax = group.lensMax === null ? record.lensMax : Math.max(group.lensMax, record.lensMax);
   }
 
   if (record.focalLength35mm) {
@@ -222,6 +317,8 @@ function serializeGroups(groups) {
         withFocal35mm: group.withFocal35mm,
         focalMin: group.focalMin,
         focalMax: group.focalMax,
+        lensMin: group.lensMin,
+        lensMax: group.lensMax,
         equivMin: group.equivMin,
         equivMax: group.equivMax,
         cropEstimate: group.cropCount ? Math.round((group.cropSum / group.cropCount) * 10) / 10 : null,
