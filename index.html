@@ -98,6 +98,34 @@
 
         <section class="panel">
           <div class="panel-head">
+            <span class="step">EX</span>
+            <div>
+              <h2>EXIF 렌즈 통계</h2>
+              <p>로컬 사진 폴더의 JPEG만 브라우저 안에서 분석해 렌즈별 초점거리 사용량을 보여줍니다.</p>
+            </div>
+          </div>
+          <div class="button-row">
+            <label class="btn btn-primary file-btn full">사진 폴더 선택
+              <input id="photoFolderInput" type="file" accept=".jpg,.jpeg,image/jpeg" webkitdirectory directory multiple hidden />
+            </label>
+            <button id="cancelExifScanBtn" class="btn btn-danger" type="button" disabled>분석 취소</button>
+            <button id="clearExifCacheBtn" class="btn" type="button">EXIF 캐시 초기화</button>
+          </div>
+          <div class="progress-stack" aria-live="polite">
+            <div class="progress-row">
+              <div><span>폴더 스캔</span><strong id="photoScanProgressText">대기</strong></div>
+              <div class="progress-bar"><span id="photoScanProgressBar"></span></div>
+            </div>
+            <div class="progress-row">
+              <div><span>EXIF 분석</span><strong id="photoExifProgressText">대기</strong></div>
+              <div class="progress-bar"><span id="photoExifProgressBar"></span></div>
+            </div>
+          </div>
+          <div id="photoAnalysisStatus" class="lens-preview">사진은 업로드되지 않습니다. EXIF와 분석 결과는 이 브라우저의 IndexedDB 캐시에만 저장됩니다.</div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
             <span class="step">03</span>
             <div>
               <h2>차트 출력 설정</h2>
@@ -249,6 +277,7 @@
             <button id="tabMounts" class="tab active" type="button">마운트</button>
             <button id="tabStyles" class="tab" type="button">스타일</button>
             <button id="tabLenses" class="tab" type="button">렌즈</button>
+            <button id="tabExif" class="tab" type="button">EXIF 분석</button>
           </div>
           <div id="mountPanel"><div class="table-wrap"><table>
             <thead><tr><th>마운트</th><th>크롭</th><th>렌즈 수</th><th>색상</th><th></th></tr></thead>
@@ -262,6 +291,35 @@
             <thead><tr><th>렌즈</th><th>마운트</th><th>유형</th><th>실제 초점거리</th><th>35mm 환산</th><th>스타일</th><th></th></tr></thead>
             <tbody id="lensTable"></tbody>
           </table></div></div>
+          <div id="exifPanel" hidden>
+            <div class="exif-panel">
+              <div class="stat-grid">
+                <div class="stat-card"><span>JPEG</span><strong id="exifStatTotal">0</strong></div>
+                <div class="stat-card"><span>분석 완료</span><strong id="exifStatProcessed">0</strong></div>
+                <div class="stat-card"><span>캐시 사용</span><strong id="exifStatCached">0</strong></div>
+                <div class="stat-card"><span>렌즈 감지</span><strong id="exifStatLens">0</strong></div>
+              </div>
+              <div class="exif-section-head">
+                <div>
+                  <p class="section-label">Lens Usage</p>
+                  <h2>렌즈별 초점거리 통계</h2>
+                </div>
+                <span id="exifIgnoredText" class="muted-pill">RAW 파일은 자동 제외</span>
+              </div>
+              <div class="table-wrap exif-table-wrap"><table>
+                <thead><tr><th>렌즈</th><th>사진 수</th><th>초점거리 범위</th><th>35mm 환산 범위</th><th>많이 쓴 초점거리</th></tr></thead>
+                <tbody id="exifLensTable"></tbody>
+              </table></div>
+              <div class="exif-section-head">
+                <div>
+                  <p class="section-label">Heatmap</p>
+                  <h2>렌즈별 초점거리 히트맵</h2>
+                </div>
+                <span class="muted-pill">진할수록 많이 사용</span>
+              </div>
+              <div id="exifHeatmap" class="heatmap-wrap"></div>
+            </div>
+          </div>
         </section>
       </section>
     </main>

@@ -17,6 +17,8 @@
 - 스타일별 색상, 선 모양, 선 두께, 텍스트 굵기 설정
 - PNG / WebP 저장
 - Excel(.xlsx/.xls/.csv) 양식 다운로드 및 업로드
+- 로컬 JPEG 폴더 EXIF 분석, 렌즈별 초점거리 통계, 히트맵 표시
+- EXIF 분석 결과 IndexedDB 캐시 및 동일 파일 재분석 건너뛰기
 - JSON 내보내기 / 불러오기
 - localStorage 자동 저장
 

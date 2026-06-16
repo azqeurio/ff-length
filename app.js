@@ -34,6 +34,16 @@ const defaultData = {
 };
 
 let state = loadState();
+const rawExtensions = new Set(["orf", "raw", "rw2", "arw", "cr2", "cr3", "nef", "dng"]);
+const exifAnalysis = {
+  worker: null,
+  running: false,
+  cancelRequested: false,
+  scan: { total: 0, scanned: 0, jpegs: 0, rawIgnored: 0, otherIgnored: 0 },
+  summary: { total: 0, processed: 0, cacheHits: 0, parsed: 0, errors: 0, withLens: 0, withFocal: 0 },
+  result: { lenses: [], focalColumns: [], maxCellCount: 0 },
+  status: "사진은 업로드되지 않습니다. EXIF와 분석 결과는 이 브라우저의 IndexedDB 캐시에만 저장됩니다."
+};
 
 function clone(obj) { return JSON.parse(JSON.stringify(obj)); }
 
@@ -684,6 +694,333 @@ function emptyRow(body, colspan, text) {
   body.appendChild(row);
 }
 
+function formatCount(value) {
+  return Number(value || 0).toLocaleString("ko-KR");
+}
+
+function rangeLabel(min, max) {
+  if (!min && !max) return "-";
+  if (min === max) return `${clean(min)}mm`;
+  return `${clean(min)}-${clean(max)}mm`;
+}
+
+function fileExtension(file) {
+  const name = String(file?.name || "").toLowerCase();
+  const index = name.lastIndexOf(".");
+  return index >= 0 ? name.slice(index + 1) : "";
+}
+
+function isJpegFile(file) {
+  const ext = fileExtension(file);
+  return ext === "jpg" || ext === "jpeg";
+}
+
+function isRawFile(file) {
+  return rawExtensions.has(fileExtension(file));
+}
+
+function nextFrame() {
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+
+function setProgress(barId, textId, current, total, text) {
+  const bar = $(barId);
+  const label = $(textId);
+  const pct = total ? Math.min(100, Math.round((current / total) * 100)) : 0;
+  if (bar) bar.style.width = `${pct}%`;
+  if (label) label.textContent = text || (total ? `${formatCount(current)} / ${formatCount(total)}` : "대기");
+}
+
+function resetExifSummary(total = 0) {
+  exifAnalysis.summary = {
+    total,
+    processed: 0,
+    cacheHits: 0,
+    parsed: 0,
+    errors: 0,
+    withLens: 0,
+    withFocal: 0
+  };
+}
+
+function renderTopFocals(topFocals) {
+  const wrap = document.createElement("div");
+  wrap.className = "top-focal-list";
+  if (!topFocals?.length) {
+    wrap.textContent = "-";
+    return wrap;
+  }
+  topFocals.forEach(item => {
+    const pill = document.createElement("span");
+    pill.textContent = `${item.focal}mm · ${formatCount(item.count)}`;
+    wrap.appendChild(pill);
+  });
+  return wrap;
+}
+
+function renderExifLensTable(lenses) {
+  const body = $("exifLensTable");
+  if (!body) return;
+  body.innerHTML = "";
+  if (!lenses.length) {
+    emptyRow(body, 5, "아직 분석된 JPEG가 없습니다. 오른쪽에서 사진 폴더를 선택하세요.");
+    return;
+  }
+
+  lenses.forEach(lens => {
+    const row = document.createElement("tr");
+    [lens.lensName, formatCount(lens.total), rangeLabel(lens.focalMin, lens.focalMax), rangeLabel(lens.equivMin, lens.equivMax)].forEach(text => {
+      const cell = document.createElement("td");
+      cell.textContent = text;
+      row.appendChild(cell);
+    });
+    const topCell = document.createElement("td");
+    topCell.appendChild(renderTopFocals(lens.topFocals));
+    row.appendChild(topCell);
+    body.appendChild(row);
+  });
+}
+
+function renderExifHeatmap(result) {
+  const wrap = $("exifHeatmap");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+
+  const lenses = result.lenses || [];
+  const columns = result.focalColumns || [];
+  if (!lenses.length || !columns.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.innerHTML = "<strong>히트맵 데이터가 없습니다.</strong><span>초점거리 EXIF가 있는 JPEG를 분석하면 여기에 표시됩니다.</span>";
+    wrap.appendChild(empty);
+    return;
+  }
+
+  const table = document.createElement("table");
+  table.className = "heatmap-table";
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  const firstHead = document.createElement("th");
+  firstHead.textContent = "Lens Name";
+  headRow.appendChild(firstHead);
+  columns.forEach(column => {
+    const th = document.createElement("th");
+    th.textContent = `${column}mm`;
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  const maxCell = Math.max(1, result.maxCellCount || 1);
+  lenses.forEach(lens => {
+    const row = document.createElement("tr");
+    const nameCell = document.createElement("td");
+    nameCell.textContent = lens.lensName;
+    row.appendChild(nameCell);
+    columns.forEach(column => {
+      const count = lens.focalCounts?.[column] || 0;
+      const cell = document.createElement("td");
+      cell.className = count ? "heatmap-cell" : "heatmap-cell empty";
+      if (count) {
+        const heat = Math.min(.92, .14 + (count / maxCell) * .78);
+        cell.style.setProperty("--heat", heat.toFixed(3));
+        cell.textContent = formatCount(count);
+        cell.title = `${lens.lensName} · ${column}mm · ${formatCount(count)} files`;
+      }
+      row.appendChild(cell);
+    });
+    tbody.appendChild(row);
+  });
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+}
+
+function renderExifAnalysis() {
+  const scan = exifAnalysis.scan;
+  const summary = exifAnalysis.summary;
+  const result = exifAnalysis.result || { lenses: [], focalColumns: [], maxCellCount: 0 };
+
+  setProgress("photoScanProgressBar", "photoScanProgressText", scan.scanned, scan.total, scan.total ? `${formatCount(scan.scanned)} / ${formatCount(scan.total)} · JPEG ${formatCount(scan.jpegs)}` : "대기");
+  setProgress("photoExifProgressBar", "photoExifProgressText", summary.processed, summary.total, summary.total ? `${formatCount(summary.processed)} / ${formatCount(summary.total)}` : "대기");
+
+  const status = $("photoAnalysisStatus");
+  if (status) status.textContent = exifAnalysis.status;
+  const cancelBtn = $("cancelExifScanBtn");
+  if (cancelBtn) cancelBtn.disabled = !exifAnalysis.running;
+
+  const total = summary.total || scan.jpegs;
+  const statMap = {
+    exifStatTotal: total,
+    exifStatProcessed: summary.processed,
+    exifStatCached: summary.cacheHits,
+    exifStatLens: summary.withLens
+  };
+  Object.entries(statMap).forEach(([id, value]) => {
+    const node = $(id);
+    if (node) node.textContent = formatCount(value);
+  });
+
+  const ignored = $("exifIgnoredText");
+  if (ignored) ignored.textContent = `RAW ${formatCount(scan.rawIgnored)}개 제외 · 기타 ${formatCount(scan.otherIgnored)}개 제외 · 오류 ${formatCount(summary.errors)}개`;
+
+  renderExifLensTable(result.lenses || []);
+  renderExifHeatmap(result);
+}
+
+async function analyzePhotoFolder(fileList) {
+  if (!fileList?.length) return;
+  cancelExifAnalysis(false);
+
+  exifAnalysis.running = true;
+  exifAnalysis.cancelRequested = false;
+  exifAnalysis.scan = { total: fileList.length, scanned: 0, jpegs: 0, rawIgnored: 0, otherIgnored: 0 };
+  exifAnalysis.result = { lenses: [], focalColumns: [], maxCellCount: 0 };
+  resetExifSummary(0);
+  exifAnalysis.status = "폴더를 스캔하는 중입니다. 하위 폴더까지 포함해 JPEG만 골라냅니다.";
+  switchTab("Exif");
+  renderExifAnalysis();
+
+  const jpegFiles = [];
+  for (let index = 0; index < fileList.length; index += 1) {
+    if (exifAnalysis.cancelRequested) return;
+    const file = fileList[index];
+    if (isJpegFile(file)) {
+      jpegFiles.push({
+        file,
+        path: file.webkitRelativePath || file.name,
+        name: file.name,
+        size: file.size,
+        lastModified: file.lastModified
+      });
+      exifAnalysis.scan.jpegs += 1;
+    } else if (isRawFile(file)) {
+      exifAnalysis.scan.rawIgnored += 1;
+    } else {
+      exifAnalysis.scan.otherIgnored += 1;
+    }
+    exifAnalysis.scan.scanned = index + 1;
+    if (index % 1000 === 0 || index === fileList.length - 1) {
+      renderExifAnalysis();
+      await nextFrame();
+    }
+  }
+
+  if (exifAnalysis.cancelRequested) return;
+  if (!jpegFiles.length) {
+    exifAnalysis.running = false;
+    exifAnalysis.status = "분석할 JPEG 파일을 찾지 못했습니다. .jpg 또는 .jpeg 파일이 있는 폴더를 선택하세요.";
+    renderExifAnalysis();
+    return;
+  }
+
+  resetExifSummary(jpegFiles.length);
+  exifAnalysis.status = `${formatCount(jpegFiles.length)}개 JPEG를 찾았습니다. EXIF를 분석하고 IndexedDB 캐시를 확인합니다.`;
+  renderExifAnalysis();
+  startExifWorker(jpegFiles);
+}
+
+function startExifWorker(files) {
+  if (!window.Worker) {
+    exifAnalysis.running = false;
+    exifAnalysis.status = "이 브라우저는 Web Worker를 지원하지 않아 대용량 EXIF 분석을 실행할 수 없습니다.";
+    renderExifAnalysis();
+    return;
+  }
+
+  const worker = new Worker("exif-worker.js");
+  exifAnalysis.worker = worker;
+
+  worker.onmessage = event => {
+    const message = event.data || {};
+    if (message.type === "progress") {
+      exifAnalysis.summary = message.summary;
+      exifAnalysis.status = `EXIF 분석 중입니다. 캐시 ${formatCount(message.summary.cacheHits)}개, 신규 분석 ${formatCount(message.summary.parsed)}개.`;
+      renderExifAnalysis();
+      return;
+    }
+
+    if (message.type === "done") {
+      exifAnalysis.summary = message.summary;
+      exifAnalysis.result = message.result || { lenses: [], focalColumns: [], maxCellCount: 0 };
+      exifAnalysis.running = false;
+      exifAnalysis.worker = null;
+      exifAnalysis.status = `분석 완료: ${formatCount(message.summary.processed)}개 JPEG, 렌즈 감지 ${formatCount(message.summary.withLens)}개, 초점거리 감지 ${formatCount(message.summary.withFocal)}개.`;
+      worker.terminate();
+      renderExifAnalysis();
+      switchTab("Exif");
+      return;
+    }
+
+    if (message.type === "cancelled") {
+      exifAnalysis.running = false;
+      exifAnalysis.worker = null;
+      exifAnalysis.status = "분석이 취소되었습니다.";
+      worker.terminate();
+      renderExifAnalysis();
+      return;
+    }
+
+    if (message.type === "error") {
+      exifAnalysis.running = false;
+      exifAnalysis.worker = null;
+      exifAnalysis.status = `분석 오류: ${message.message}`;
+      worker.terminate();
+      renderExifAnalysis();
+    }
+  };
+
+  worker.onerror = error => {
+    exifAnalysis.running = false;
+    exifAnalysis.worker = null;
+    exifAnalysis.status = `분석 오류: ${error.message || "Worker failed"}`;
+    worker.terminate();
+    renderExifAnalysis();
+  };
+
+  worker.postMessage({ type: "start", files });
+}
+
+function cancelExifAnalysis(showStatus = true) {
+  if (!exifAnalysis.running && !exifAnalysis.worker) return;
+  exifAnalysis.cancelRequested = true;
+  if (exifAnalysis.worker) {
+    exifAnalysis.worker.postMessage({ type: "cancel" });
+    exifAnalysis.worker.terminate();
+    exifAnalysis.worker = null;
+  }
+  exifAnalysis.running = false;
+  if (showStatus) exifAnalysis.status = "분석이 취소되었습니다.";
+  renderExifAnalysis();
+}
+
+function clearExifCache() {
+  if (!window.indexedDB) {
+    alert("이 브라우저는 IndexedDB를 지원하지 않아 EXIF 캐시를 사용할 수 없습니다.");
+    return;
+  }
+  if (exifAnalysis.running) {
+    alert("분석이 진행 중일 때는 캐시를 초기화할 수 없습니다. 먼저 분석을 취소해 주세요.");
+    return;
+  }
+  if (!confirm("이 브라우저에 저장된 EXIF 분석 캐시를 삭제할까요? 사진 파일은 건드리지 않습니다.")) return;
+
+  const request = indexedDB.deleteDatabase("lensRoadmapExifCacheV1");
+  request.onsuccess = () => {
+    exifAnalysis.summary.cacheHits = 0;
+    exifAnalysis.status = "EXIF 캐시를 초기화했습니다. 다음 분석에서는 JPEG를 다시 읽습니다.";
+    renderExifAnalysis();
+    toast("EXIF 캐시를 초기화했습니다.");
+  };
+  request.onerror = () => {
+    alert("EXIF 캐시를 초기화하지 못했습니다. 브라우저 저장소 권한을 확인해 주세요.");
+  };
+  request.onblocked = () => {
+    exifAnalysis.status = "캐시 초기화가 대기 중입니다. 다른 탭에서 이 앱을 닫은 뒤 다시 시도해 주세요.";
+    renderExifAnalysis();
+  };
+}
+
 function renderTables() {
   const mountBody = $("mountTable");
   const styleBody = $("styleTable");
@@ -756,6 +1093,7 @@ function renderAll() {
   renderMountSummary();
   renderChart();
   renderTables();
+  renderExifAnalysis();
   updateLensPreview();
 }
 
@@ -1274,7 +1612,8 @@ function switchTab(tab) {
   const panelByTab = {
     Mounts: "mountPanel",
     Styles: "stylePanel",
-    Lenses: "lensPanel"
+    Lenses: "lensPanel",
+    Exif: "exifPanel"
   };
 
   Object.keys(panelByTab).forEach(name => {
@@ -1320,6 +1659,13 @@ function bind() {
   $("importJsonInput").addEventListener("change", e => e.target.files[0] && importJson(e.target.files[0]));
   $("downloadSheetTemplateBtn").addEventListener("click", downloadSheetTemplate);
   $("importSheetInput").addEventListener("change", e => e.target.files[0] && importSheet(e.target.files[0]));
+  $("photoFolderInput").addEventListener("change", e => {
+    const files = Array.from(e.target.files || []);
+    analyzePhotoFolder(files);
+    e.target.value = "";
+  });
+  $("cancelExifScanBtn").addEventListener("click", () => cancelExifAnalysis());
+  $("clearExifCacheBtn").addEventListener("click", clearExifCache);
 
   $("lensName").addEventListener("input", () => {
     applyParsedFocal(false);
@@ -1363,6 +1709,7 @@ function bind() {
   $("tabMounts").addEventListener("click", () => switchTab("Mounts"));
   $("tabStyles").addEventListener("click", () => switchTab("Styles"));
   $("tabLenses").addEventListener("click", () => switchTab("Lenses"));
+  $("tabExif").addEventListener("click", () => switchTab("Exif"));
 }
 
 bind();
