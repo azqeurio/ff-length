@@ -37,6 +37,13 @@ let state = loadState();
 
 function clone(obj) { return JSON.parse(JSON.stringify(obj)); }
 
+function toNumber(value, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const normalized = String(value || "").replace(",", ".");
+  const match = normalized.match(/-?\d+(?:\.\d+)?/);
+  return match ? Number(match[0]) : fallback;
+}
+
 function loadState() {
   try {
     const saved = JSON.parse(localStorage.getItem("lensRoadmapStudioV3"));
@@ -71,7 +78,7 @@ function normalizeState(data) {
     .map(m => ({
       id: String(m.id || uid()),
       name: String(m.name || "Untitled Mount").trim(),
-      crop: Math.max(0.1, Number(m.crop) || 1),
+      crop: Math.max(0.1, toNumber(m.crop, 1)),
       color: m.color || "#64748B"
     }))
     .filter(m => m.name) : [];
@@ -138,9 +145,25 @@ function dashArray(style) {
   return "";
 }
 
-function displayValue(lens, value) {
+function cropForLens(lens) {
   const mount = mountById(lens.mountId);
-  const crop = mount ? Number(mount.crop) : 1;
+  return Math.max(0.1, toNumber(mount?.crop, 1));
+}
+
+function chartCropValues() {
+  return [...new Set(state.lenses
+    .map(lens => cropForLens(lens))
+    .filter(crop => Number.isFinite(crop) && crop > 0)
+    .map(crop => Math.round(crop * 1000) / 1000))];
+}
+
+function singleChartCrop() {
+  const crops = chartCropValues();
+  return crops.length === 1 ? crops[0] : null;
+}
+
+function displayValue(lens, value) {
+  const crop = cropForLens(lens);
   return $("displayMode").value === "equiv" ? value * crop : value;
 }
 
@@ -149,8 +172,7 @@ function actualRange(lens) {
 }
 
 function equivRange(lens) {
-  const mount = mountById(lens.mountId);
-  const crop = mount ? Number(mount.crop) : 1;
+  const crop = cropForLens(lens);
   const s = Number(lens.start) * crop;
   const e = Number(lens.end) * crop;
   return s === e ? `${clean(s)}mm` : `${clean(s)}-${clean(e)}mm`;
@@ -210,9 +232,27 @@ function scaleFactory(min, max, width) {
 const axisFitPresets = [7, 8, 10, 12, 14, 16, 20, 24, 28, 35, 40, 50, 70, 75, 85, 100, 135, 150, 200, 300, 400, 560, 600, 800, 1000, 1200, 1600, 2000, 2400, 3200];
 const axisTickPresets = [7, 12, 20, 40, 75, 100, 150, 300, 400, 800, 1000, 1200, 1600, 2000, 2400, 3200];
 
-function ticksFor(min, max) {
-  return [...new Set([min, ...axisTickPresets.filter(v => v > min && v < max), max])]
+function axisPresetValue(value) {
+  return Math.round(Number(value) * 10) / 10;
+}
+
+function axisPresetValues(presets) {
+  const crop = singleChartCrop();
+  if ($("displayMode").value === "equiv" && crop) {
+    return presets.map(value => axisPresetValue(value * crop));
+  }
+  return presets;
+}
+
+function uniqueAxisValues(values) {
+  return [...new Set(values.map(axisPresetValue))]
+    .filter(value => Number.isFinite(value))
     .sort((a, b) => a - b);
+}
+
+function ticksFor(min, max) {
+  const ticks = axisPresetValues(axisTickPresets).filter(v => v > min && v < max);
+  return uniqueAxisValues([min, ...ticks, max]);
 }
 
 function lensAxisValues() {
@@ -221,9 +261,9 @@ function lensAxisValues() {
     const start = displayValue(lens, Number(lens.start));
     const end = displayValue(lens, Number(lens.end));
     if (!Number.isFinite(start) || !Number.isFinite(end)) return;
-    values.push(start, end);
-    if ($("showTeleconverters")?.checked && lens.tc14) values.push(end * 1.4);
-    if ($("showTeleconverters")?.checked && lens.tc20) values.push(end * 2);
+    values.push(axisPresetValue(start), axisPresetValue(end));
+    if ($("showTeleconverters")?.checked && lens.tc14) values.push(axisPresetValue(end * 1.4));
+    if ($("showTeleconverters")?.checked && lens.tc20) values.push(axisPresetValue(end * 2));
   });
   return values.filter(value => Number.isFinite(value) && value > 0);
 }
@@ -235,20 +275,21 @@ function fittedAxisRange() {
   const minValue = Math.max(1, Math.min(...values));
   const maxValue = Math.max(...values);
   let lowerIndex = -1;
-  for (let i = axisFitPresets.length - 1; i >= 0; i -= 1) {
-    if (axisFitPresets[i] < minValue) {
+  const fitPresets = axisPresetValues(axisFitPresets);
+  for (let i = fitPresets.length - 1; i >= 0; i -= 1) {
+    if (fitPresets[i] < minValue) {
       lowerIndex = i;
       break;
     }
   }
-  const upperIndex = axisFitPresets.findIndex(value => value > maxValue);
-  let lower = lowerIndex >= 0 ? axisFitPresets[lowerIndex] : axisFitPresets[0];
-  let upper = upperIndex >= 0 ? axisFitPresets[upperIndex] : Math.ceil(maxValue * 1.12);
+  const upperIndex = fitPresets.findIndex(value => value > maxValue);
+  let lower = lowerIndex >= 0 ? fitPresets[lowerIndex] : fitPresets[0];
+  let upper = upperIndex >= 0 ? fitPresets[upperIndex] : Math.ceil(maxValue * 1.12);
 
   if (lower >= upper) {
-    const nearestIndex = Math.max(0, axisFitPresets.findIndex(value => value >= minValue));
-    lower = axisFitPresets[Math.max(0, nearestIndex - 1)] || Math.max(1, Math.floor(minValue * .82));
-    upper = axisFitPresets[Math.min(axisFitPresets.length - 1, nearestIndex + 1)] || Math.ceil(maxValue * 1.18);
+    const nearestIndex = Math.max(0, fitPresets.findIndex(value => value >= minValue));
+    lower = fitPresets[Math.max(0, nearestIndex - 1)] || Math.max(1, Math.floor(minValue * .82));
+    upper = fitPresets[Math.min(fitPresets.length - 1, nearestIndex + 1)] || Math.ceil(maxValue * 1.18);
   }
 
   return { min: lower, max: upper };
@@ -335,17 +376,16 @@ function chartRows() {
     .filter(row => row.items.length);
 }
 
-function referenceCrop() {
-  const firstLens = state.lenses.find(lens => mountById(lens.mountId));
-  const mount = firstLens ? mountById(firstLens.mountId) : state.mounts[0];
-  return mount ? Number(mount.crop) || 1 : 1;
-}
-
 function axisPair(value, crop) {
   if ($("displayMode").value === "equiv") {
     return { actual: value / crop, equiv: value };
   }
   return { actual: value, equiv: value * crop };
+}
+
+function resolvedAxisLabelMode(requestedMode, crop) {
+  if (crop) return requestedMode;
+  return $("displayMode").value === "equiv" ? "equiv" : "actual";
 }
 
 function renderChart() {
@@ -368,7 +408,7 @@ function renderChart() {
   const right = 64;
   const width = 1320;
   const footerH = 34;
-  const crop = referenceCrop();
+  const crop = singleChartCrop();
 
   let contentH = 0;
   rows.forEach(row => {
@@ -401,7 +441,8 @@ function renderChart() {
   const plotLeft = 30;
   const plotRight = width - right;
   const labelColumnX = (plotLeft + leftType) / 2;
-  const labelMode = $("labelMode")?.value || "both";
+  const requestedLabelMode = $("labelMode")?.value || "both";
+  const labelMode = resolvedAxisLabelMode(requestedLabelMode, crop);
   const tickData = ticks.map(t => ({ t, px: leftChart + x(t) }));
   const labelGap = labelMode === "both" ? 64 : 58;
   const labeledTicks = [];
@@ -426,7 +467,7 @@ function renderChart() {
 
   ticks.forEach(t => {
     const px = leftChart + x(t);
-    const pair = axisPair(t, crop);
+    const pair = crop ? axisPair(t, crop) : { actual: t, equiv: t };
     makeEl(svg, "line", { x1: px, y1: plotTop, x2: px, y2: plotBottom, stroke: "#BEBEBE", "stroke-width": 1.2, "stroke-dasharray": "5 7" });
     if (!labelTickSet.has(t)) return;
     if (labelMode === "both") {
@@ -732,7 +773,7 @@ function toast(msg) {
 
 function addMount(name, crop, color, selectAfter = true) {
   const cleanName = String(name || "").trim();
-  const cleanCrop = Number(crop);
+  const cleanCrop = toNumber(crop);
   if (!cleanName || !cleanCrop) {
     alert("마운트 이름과 크롭 팩터를 입력해 주세요.");
     return null;
@@ -1075,9 +1116,7 @@ function sheetValue(row, key) {
 }
 
 function sheetNumber(value) {
-  if (typeof value === "number") return value;
-  const match = String(value || "").match(/(\d+(?:\.\d+)?)/);
-  return match ? Number(match[1]) : 0;
+  return toNumber(value);
 }
 
 function sheetBool(value) {
@@ -1096,7 +1135,8 @@ function sheetType(value, start, end) {
 function ensureSheetMount(name, crop) {
   const fallback = state.mounts[0] || { name: "Default Mount", crop: 1, color: "#111827" };
   const cleanName = String(name || fallback.name).trim() || "Default Mount";
-  const cleanCrop = Number(crop) || Number(fallback.crop) || 1;
+  const parsedCrop = toNumber(crop);
+  const cleanCrop = parsedCrop || toNumber(fallback.crop, 1);
   const existing = state.mounts.find(m => m.name.toLowerCase() === cleanName.toLowerCase());
   if (existing) {
     if (!existing.crop && cleanCrop) existing.crop = cleanCrop;
