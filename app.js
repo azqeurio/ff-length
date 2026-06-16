@@ -39,7 +39,7 @@ const exifAnalysis = {
   worker: null,
   running: false,
   cancelRequested: false,
-  scan: { total: 0, scanned: 0, jpegs: 0, rawIgnored: 0, otherIgnored: 0 },
+  scan: { total: 0, scanned: 0, jpegs: 0, raws: 0, rawIgnored: 0, otherIgnored: 0 },
   summary: { total: 0, processed: 0, cacheHits: 0, parsed: 0, errors: 0, withLens: 0, withFocal: 0 },
   result: { lenses: [], focalColumns: [], maxCellCount: 0 },
   status: "사진은 업로드되지 않습니다. EXIF와 분석 결과는 이 브라우저의 IndexedDB 캐시에만 저장됩니다."
@@ -374,6 +374,79 @@ function chartLensName(name) {
     .trim();
 }
 
+function normalizeLensLookupName(name) {
+  return chartLensName(name)
+    .toLowerCase()
+    .replace(/\b(olympus|om-system|om system|m\.?zuiko|zuiko|digital|ed|leica|dg|lumix|panasonic|canon|nikon|sony|fujifilm|fuji|sigma|tamron|lens)\b/g, "")
+    .replace(/[^a-z0-9.]+/g, "");
+}
+
+function statsFocalRange(stats) {
+  if (!stats?.focalCounts) return null;
+  const focals = Object.keys(stats.focalCounts).map(Number).filter(value => Number.isFinite(value));
+  if (!focals.length) return null;
+  return { start: Math.min(...focals), end: Math.max(...focals) };
+}
+
+function focalRangeScore(lens, stats) {
+  const range = statsFocalRange(stats) || parseFocalRange(stats?.lensName);
+  if (!range) return 0;
+  const lensStart = Number(lens.start);
+  const lensEnd = Number(lens.end);
+  const startDelta = Math.abs(lensStart - Number(range.start));
+  const endDelta = Math.abs(lensEnd - Number(range.end));
+  if (lensStart === lensEnd && Math.abs(lensStart - Number(range.start)) <= 0.8) return 1.5;
+  if (startDelta <= 0.8 && endDelta <= 0.8) return 2;
+  if (Number(range.start) >= lensStart - 0.8 && Number(range.end) <= lensEnd + 0.8) return .7;
+  return 0;
+}
+
+function roadmapExifEnabled() {
+  return $("showRoadmapExifHeatmap")?.checked && (exifAnalysis.result?.lenses || []).length > 0;
+}
+
+function roadmapExifStatsForLens(lens) {
+  if (!roadmapExifEnabled()) return null;
+  const target = normalizeLensLookupName(lens.name);
+  let best = null;
+  let bestScore = 0;
+
+  (exifAnalysis.result.lenses || []).forEach(stats => {
+    if (!stats.lensName || /^unknown lens$/i.test(stats.lensName)) return;
+    const key = normalizeLensLookupName(stats.lensName);
+    let score = 0;
+    if (key && target && key === target) score += 100;
+    else if (key && target && (key.includes(target) || target.includes(key))) score += 28;
+    score += focalRangeScore(lens, stats);
+    if (score > bestScore) {
+      best = stats;
+      bestScore = score;
+    }
+  });
+
+  return bestScore >= 2 ? best : null;
+}
+
+function roadmapMaxLensTotal() {
+  return Math.max(1, ...(exifAnalysis.result?.lenses || []).map(lens => Number(lens.total) || 0));
+}
+
+function heatColor(count, max) {
+  const ratio = clamp((Number(count) || 0) / Math.max(1, Number(max) || 1), 0, 1);
+  const hue = 220 - ratio * 220;
+  const light = 52 - ratio * 7;
+  return `hsl(${hue}, 86%, ${light}%)`;
+}
+
+function focalEntriesForLens(lens, stats) {
+  const start = Number(lens.start);
+  const end = Number(lens.end);
+  return Object.entries(stats?.focalCounts || {})
+    .map(([focal, count]) => ({ focal: Number(focal), count: Number(count) || 0 }))
+    .filter(item => Number.isFinite(item.focal) && item.count > 0 && item.focal >= start - .5 && item.focal <= end + .5)
+    .sort((a, b) => a.focal - b.focal);
+}
+
 function chartRows() {
   return ["prime", "macro", "zoom"]
     .map(type => ({
@@ -517,7 +590,8 @@ function renderChart() {
       const label = shortText(chartLensName(lens.name), isZoom ? 46 : 24);
       const color = style.name.toLowerCase().includes("standard") ? "#9A9A9A" : "#1F1F1F";
       const cy = isZoom ? y + 33 + idx * rowH : y + 31 + idx * primeRowH;
-      return { lens, idx, style, start, end, startX, endX, label, color, cy };
+      const exifStats = roadmapExifStatsForLens(lens);
+      return { lens, idx, style, start, end, startX, endX, label, color, cy, exifStats };
     });
 
     if (isZoom) {
@@ -531,7 +605,7 @@ function renderChart() {
     }
 
     plottedItems.forEach(item => {
-      const { lens, style, startX, endX, label, color, cy, end } = item;
+      const { lens, style, startX, endX, label, color, cy, end, exifStats } = item;
       if (!isZoom) {
         const labelW = textWidth(label, 82, 190, 6.1);
         const labelRightX = startX + 12;
@@ -540,7 +614,8 @@ function renderChart() {
         const anchor = labelFitsRight ? "start" : "end";
         const maskX = anchor === "start" ? labelX - 3 : labelX - labelW - 3;
         const redraw = () => {
-          makeEl(svg, "circle", { cx: startX, cy, r: 4.5, fill: color });
+          const primeColor = exifStats ? heatColor(exifStats.total, roadmapMaxLensTotal()) : color;
+          makeEl(svg, "circle", { cx: startX, cy, r: exifStats ? 5.7 : 4.5, fill: primeColor, stroke: exifStats ? "#FFFFFF" : "", "stroke-width": exifStats ? 1.5 : "" });
           makeEl(svg, "rect", { x: maskX, y: cy - 9, width: labelW + 6, height: 15, fill: "#FFFFFF" });
           makeText(svg, { x: labelX, y: cy + 4, "font-size": 10.8, "font-weight": 850, "text-anchor": anchor, fill: "#111111" }, label);
         };
@@ -549,7 +624,10 @@ function renderChart() {
       }
 
       makeEl(svg, "rect", { x: startX - 6, y: cy - 5, width: 8, height: 10, fill: color });
-      makeEl(svg, "line", { x1: startX, y1: cy, x2: endX, y2: cy, stroke: color, "stroke-width": Number(style.width) + 1, "stroke-linecap": "butt", "stroke-dasharray": dashArray(style) });
+      const heatDrawn = exifStats ? drawZoomHeatmapLine(svg, item, exifStats, leftChart, chartW, x) : false;
+      if (!heatDrawn) {
+        makeEl(svg, "line", { x1: startX, y1: cy, x2: endX, y2: cy, stroke: color, "stroke-width": Number(style.width) + 1, "stroke-linecap": "butt", "stroke-dasharray": dashArray(style) });
+      }
       const labelW = textWidth(label, 104, 250, 6.1);
       const labelX = clamp(startX + 9, leftChart + 7, plotRight - labelW - 5);
       makeEl(svg, "rect", { x: labelX - 3, y: cy + 8, width: labelW, height: 16, fill: "#FFFFFF" });
@@ -576,6 +654,12 @@ function renderChart() {
     makeEl(svg, "line", { x1: tcLegendX + 100, y1: legendY - 4, x2: tcLegendX + 128, y2: legendY - 4, stroke: "#6F7C85", "stroke-width": 4, "stroke-linecap": "butt" });
     makeText(svg, { x: tcLegendX + 135, y: legendY, "font-size": 11, "font-weight": 850, fill: "#111111" }, "2x TC");
   }
+  if (roadmapExifEnabled()) {
+    const heatX = plotLeft + 300;
+    makeEl(svg, "line", { x1: heatX, y1: legendY - 4, x2: heatX + 26, y2: legendY - 4, stroke: heatColor(1, 10), "stroke-width": 5, "stroke-linecap": "butt" });
+    makeEl(svg, "line", { x1: heatX + 26, y1: legendY - 4, x2: heatX + 52, y2: legendY - 4, stroke: heatColor(10, 10), "stroke-width": 5, "stroke-linecap": "butt" });
+    makeText(svg, { x: heatX + 60, y: legendY, "font-size": 11, "font-weight": 850, fill: "#111111" }, "EXIF heatmap low → high");
+  }
   state.styles.forEach(style => {
     const color = style.name.toLowerCase().includes("standard") ? "#9A9A9A" : "#1F1F1F";
     makeEl(svg, "rect", { x: lx, y: legendY - 8, width: 9, height: 9, fill: color });
@@ -589,6 +673,38 @@ function drawTc(svg, leftChart, chartW, x, startX, y, tcEnd, max, color, dash, l
   const tcX = clamp(leftChart + x(tcEnd), leftChart, leftChart + chartW);
   makeEl(svg, "line", { x1: startX, y1: y, x2: tcX, y2: y, stroke: color, "stroke-width": 4, "stroke-linecap": "butt", "stroke-dasharray": dash });
   if (label) makeText(svg, { x: tcX + 8, y: y + 4, "font-size": 10, "font-weight": 800, fill: "#64748B" }, label);
+}
+
+function drawZoomHeatmapLine(svg, item, stats, leftChart, chartW, x) {
+  const entries = focalEntriesForLens(item.lens, stats);
+  if (!entries.length) return false;
+
+  const lensStart = Number(item.lens.start);
+  const lensEnd = Number(item.lens.end);
+  const maxCount = Math.max(1, ...entries.map(entry => entry.count));
+  const width = Math.max(6, Number(item.style.width) + 3);
+
+  entries.forEach((entry, index) => {
+    const prev = entries[index - 1]?.focal;
+    const next = entries[index + 1]?.focal;
+    const segStart = prev === undefined ? lensStart : (prev + entry.focal) / 2;
+    const segEnd = next === undefined ? lensEnd : (entry.focal + next) / 2;
+    const displayStart = displayValue(item.lens, Math.max(lensStart, segStart));
+    const displayEnd = displayValue(item.lens, Math.min(lensEnd, segEnd));
+    const x1 = clamp(leftChart + x(displayStart), leftChart, leftChart + chartW);
+    const x2 = clamp(leftChart + x(displayEnd), leftChart, leftChart + chartW);
+    makeEl(svg, "line", {
+      x1,
+      y1: item.cy,
+      x2: Math.max(x1 + 1, x2),
+      y2: item.cy,
+      stroke: heatColor(entry.count, maxCount),
+      "stroke-width": width,
+      "stroke-linecap": "butt"
+    });
+  });
+
+  return true;
 }
 
 function drawZoomGuide(svg, x, y1, y2) {
@@ -719,6 +835,14 @@ function isRawFile(file) {
   return rawExtensions.has(fileExtension(file));
 }
 
+function photoPath(file) {
+  return file.webkitRelativePath || file.name;
+}
+
+function photoBaseKey(file) {
+  return photoPath(file).replace(/\.[^.\\/]+$/i, "").toLowerCase();
+}
+
 function nextFrame() {
   return new Promise(resolve => setTimeout(resolve, 0));
 }
@@ -841,7 +965,7 @@ function renderExifAnalysis() {
   const summary = exifAnalysis.summary;
   const result = exifAnalysis.result || { lenses: [], focalColumns: [], maxCellCount: 0 };
 
-  setProgress("photoScanProgressBar", "photoScanProgressText", scan.scanned, scan.total, scan.total ? `${formatCount(scan.scanned)} / ${formatCount(scan.total)} · JPEG ${formatCount(scan.jpegs)}` : "대기");
+  setProgress("photoScanProgressBar", "photoScanProgressText", scan.scanned, scan.total, scan.total ? `${formatCount(scan.scanned)} / ${formatCount(scan.total)} · JPG ${formatCount(scan.jpegs)} · RAW ${formatCount(scan.raws)}` : "대기");
   setProgress("photoExifProgressBar", "photoExifProgressText", summary.processed, summary.total, summary.total ? `${formatCount(summary.processed)} / ${formatCount(summary.total)}` : "대기");
 
   const status = $("photoAnalysisStatus");
@@ -849,7 +973,7 @@ function renderExifAnalysis() {
   const cancelBtn = $("cancelExifScanBtn");
   if (cancelBtn) cancelBtn.disabled = !exifAnalysis.running;
 
-  const total = summary.total || scan.jpegs;
+  const total = summary.total || Math.max(0, scan.jpegs + scan.raws - scan.rawIgnored);
   const statMap = {
     exifStatTotal: total,
     exifStatProcessed: summary.processed,
@@ -862,7 +986,7 @@ function renderExifAnalysis() {
   });
 
   const ignored = $("exifIgnoredText");
-  if (ignored) ignored.textContent = `RAW ${formatCount(scan.rawIgnored)}개 제외 · 기타 ${formatCount(scan.otherIgnored)}개 제외 · 오류 ${formatCount(summary.errors)}개`;
+  if (ignored) ignored.textContent = `중복 RAW ${formatCount(scan.rawIgnored)}개 제외 · 기타 ${formatCount(scan.otherIgnored)}개 제외 · 오류 ${formatCount(summary.errors)}개`;
 
   renderExifLensTable(result.lenses || []);
   renderExifHeatmap(result);
@@ -874,28 +998,44 @@ async function analyzePhotoFolder(fileList) {
 
   exifAnalysis.running = true;
   exifAnalysis.cancelRequested = false;
-  exifAnalysis.scan = { total: fileList.length, scanned: 0, jpegs: 0, rawIgnored: 0, otherIgnored: 0 };
+  exifAnalysis.scan = { total: fileList.length, scanned: 0, jpegs: 0, raws: 0, rawIgnored: 0, otherIgnored: 0 };
   exifAnalysis.result = { lenses: [], focalColumns: [], maxCellCount: 0 };
   resetExifSummary(0);
-  exifAnalysis.status = "폴더를 스캔하는 중입니다. 하위 폴더까지 포함해 JPEG만 골라냅니다.";
+  exifAnalysis.status = "폴더를 스캔하는 중입니다. 하위 폴더까지 포함해 JPEG와 RAW EXIF 후보를 골라냅니다.";
   switchTab("Exif");
   renderExifAnalysis();
 
-  const jpegFiles = [];
+  const photoEntries = new Map();
   for (let index = 0; index < fileList.length; index += 1) {
     if (exifAnalysis.cancelRequested) return;
     const file = fileList[index];
+    const baseKey = photoBaseKey(file);
     if (isJpegFile(file)) {
-      jpegFiles.push({
+      const previous = photoEntries.get(baseKey);
+      if (previous?.kind === "raw") exifAnalysis.scan.rawIgnored += 1;
+      photoEntries.set(baseKey, {
         file,
-        path: file.webkitRelativePath || file.name,
+        kind: "jpeg",
+        path: photoPath(file),
         name: file.name,
         size: file.size,
         lastModified: file.lastModified
       });
       exifAnalysis.scan.jpegs += 1;
     } else if (isRawFile(file)) {
-      exifAnalysis.scan.rawIgnored += 1;
+      exifAnalysis.scan.raws += 1;
+      if (photoEntries.has(baseKey)) {
+        exifAnalysis.scan.rawIgnored += 1;
+      } else {
+        photoEntries.set(baseKey, {
+          file,
+          kind: "raw",
+          path: photoPath(file),
+          name: file.name,
+          size: file.size,
+          lastModified: file.lastModified
+        });
+      }
     } else {
       exifAnalysis.scan.otherIgnored += 1;
     }
@@ -907,17 +1047,18 @@ async function analyzePhotoFolder(fileList) {
   }
 
   if (exifAnalysis.cancelRequested) return;
-  if (!jpegFiles.length) {
+  const photoFiles = [...photoEntries.values()];
+  if (!photoFiles.length) {
     exifAnalysis.running = false;
-    exifAnalysis.status = "분석할 JPEG 파일을 찾지 못했습니다. .jpg 또는 .jpeg 파일이 있는 폴더를 선택하세요.";
+    exifAnalysis.status = "분석할 JPEG/RAW 파일을 찾지 못했습니다. 사진 파일이 있는 폴더를 선택하세요.";
     renderExifAnalysis();
     return;
   }
 
-  resetExifSummary(jpegFiles.length);
-  exifAnalysis.status = `${formatCount(jpegFiles.length)}개 JPEG를 찾았습니다. EXIF를 분석하고 IndexedDB 캐시를 확인합니다.`;
+  resetExifSummary(photoFiles.length);
+  exifAnalysis.status = `${formatCount(photoFiles.length)}개 사진을 찾았습니다. JPG가 있는 동일 RAW는 제외했고, EXIF 캐시를 확인합니다.`;
   renderExifAnalysis();
-  startExifWorker(jpegFiles);
+  startExifWorker(photoFiles);
 }
 
 function startExifWorker(files) {
@@ -945,9 +1086,10 @@ function startExifWorker(files) {
       exifAnalysis.result = message.result || { lenses: [], focalColumns: [], maxCellCount: 0 };
       exifAnalysis.running = false;
       exifAnalysis.worker = null;
-      exifAnalysis.status = `분석 완료: ${formatCount(message.summary.processed)}개 JPEG, 렌즈 감지 ${formatCount(message.summary.withLens)}개, 초점거리 감지 ${formatCount(message.summary.withFocal)}개.`;
+      exifAnalysis.status = `분석 완료: ${formatCount(message.summary.processed)}개 사진, 렌즈 감지 ${formatCount(message.summary.withLens)}개, 초점거리 감지 ${formatCount(message.summary.withFocal)}개.`;
       worker.terminate();
       renderExifAnalysis();
+      renderChart();
       switchTab("Exif");
       return;
     }
@@ -1695,7 +1837,7 @@ function bind() {
     renderAll();
   });
 
-  ["displayMode", "labelMode", "scaleMode", "chartTitle", "autoCropAxis", "axisMin", "axisMax", "showTeleconverters", "showZoomGuides"].forEach(id => {
+  ["displayMode", "labelMode", "scaleMode", "chartTitle", "autoCropAxis", "axisMin", "axisMax", "showTeleconverters", "showZoomGuides", "showRoadmapExifHeatmap"].forEach(id => {
     $(id).addEventListener("input", () => {
       renderChart();
       updateLensPreview();

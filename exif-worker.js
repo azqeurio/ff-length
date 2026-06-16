@@ -104,6 +104,7 @@ async function parsePhoto(entry) {
     cacheKey: cacheKeyFor(entry),
     path,
     name: entry?.name || file.name,
+    kind: entry?.kind || "photo",
     size: entry?.size ?? file.size,
     lastModified: entry?.lastModified ?? file.lastModified,
     lensName: UNKNOWN_LENS,
