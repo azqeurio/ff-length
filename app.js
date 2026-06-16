@@ -34,6 +34,17 @@ const defaultData = {
 };
 
 let state = loadState();
+const defaultVisualSettings = {
+  heatLowColor: "#FFFFFF",
+  heatHighColor: "#DC2626",
+  chartBackgroundColor: "#FFFFFF",
+  plotBackgroundColor: "#FFFFFF",
+  chartLineColor: "#4B4B4B",
+  chartGridColor: "#BEBEBE",
+  rangeFallbackColor: "#111111",
+  chartTextColor: "#111111"
+};
+let visualSettings = loadVisualSettings();
 const rawExtensions = new Set(["orf", "raw", "rw2", "arw", "cr2", "cr3", "nef", "dng"]);
 const exifAnalysis = {
   worker: null,
@@ -41,7 +52,7 @@ const exifAnalysis = {
   cancelRequested: false,
   scan: { total: 0, scanned: 0, jpegs: 0, raws: 0, rawIgnored: 0, otherIgnored: 0 },
   summary: { total: 0, processed: 0, cacheHits: 0, parsed: 0, errors: 0, withLens: 0, withFocal: 0 },
-  result: { lenses: [], focalColumns: [], maxCellCount: 0 },
+  result: loadStoredExifResult(),
   status: "사진은 업로드되지 않습니다. EXIF와 분석 결과는 이 브라우저의 IndexedDB 캐시에만 저장됩니다."
 };
 
@@ -139,6 +150,100 @@ function normalizeState(data) {
 function saveState() { localStorage.setItem("lensRoadmapStudioV3", JSON.stringify(state)); }
 function mountById(id) { return state.mounts.find(m => m.id === id); }
 function styleById(id) { return state.styles.find(s => s.id === id) || state.styles[0] || { name: "Default", color: "#667085", dash: "solid", width: 5, weight: 650 }; }
+
+function emptyExifResult() {
+  return { lenses: [], focalColumns: [], maxCellCount: 0 };
+}
+
+function loadStoredExifResult() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("lensRoadmapExifResultV1"));
+    if (Array.isArray(saved?.lenses) && Array.isArray(saved?.focalColumns)) {
+      return {
+        lenses: saved.lenses,
+        focalColumns: saved.focalColumns,
+        maxCellCount: Number(saved.maxCellCount) || 0
+      };
+    }
+  } catch {}
+  return emptyExifResult();
+}
+
+function saveStoredExifResult(result) {
+  localStorage.setItem("lensRoadmapExifResultV1", JSON.stringify(result || emptyExifResult()));
+}
+
+function normalizeHexColor(value, fallback = "#000000") {
+  const text = String(value || "").trim();
+  if (/^#[0-9a-f]{6}$/i.test(text)) return text.toUpperCase();
+  if (/^#[0-9a-f]{3}$/i.test(text)) {
+    return `#${text[1]}${text[1]}${text[2]}${text[2]}${text[3]}${text[3]}`.toUpperCase();
+  }
+  return fallback;
+}
+
+function loadVisualSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("lensRoadmapVisualSettingsV1"));
+    return Object.fromEntries(Object.entries(defaultVisualSettings).map(([key, fallback]) => [key, normalizeHexColor(saved?.[key], fallback)]));
+  } catch {}
+  return { ...defaultVisualSettings };
+}
+
+function saveVisualSettings() {
+  localStorage.setItem("lensRoadmapVisualSettingsV1", JSON.stringify(visualSettings));
+}
+
+function readVisualSettingsFromDom() {
+  const next = { ...visualSettings };
+  Object.entries(defaultVisualSettings).forEach(([key, fallback]) => {
+    const node = $(key);
+    next[key] = normalizeHexColor(node?.value || next[key], fallback);
+  });
+  return next;
+}
+
+function applyVisualSettingsToDom() {
+  Object.entries(visualSettings).forEach(([key, value]) => {
+    const node = $(key);
+    if (node) node.value = normalizeHexColor(value, defaultVisualSettings[key]);
+  });
+}
+
+function currentVisualSettings() {
+  visualSettings = readVisualSettingsFromDom();
+  return visualSettings;
+}
+
+function hexToRgb(hex) {
+  const value = normalizeHexColor(hex).slice(1);
+  return {
+    r: parseInt(value.slice(0, 2), 16),
+    g: parseInt(value.slice(2, 4), 16),
+    b: parseInt(value.slice(4, 6), 16)
+  };
+}
+
+function rgbToHex({ r, g, b }) {
+  return `#${[r, g, b].map(value => Math.round(clamp(value, 0, 255)).toString(16).padStart(2, "0")).join("")}`.toUpperCase();
+}
+
+function mixColor(low, high, ratio) {
+  const a = hexToRgb(low);
+  const b = hexToRgb(high);
+  const t = clamp(ratio, 0, 1);
+  return rgbToHex({
+    r: a.r + (b.r - a.r) * t,
+    g: a.g + (b.g - a.g) * t,
+    b: a.b + (b.b - a.b) * t
+  });
+}
+
+function contrastColor(hex) {
+  const { r, g, b } = hexToRgb(hex);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > .55 ? "#111111" : "#FFFFFF";
+}
 
 function clean(n) {
   const v = Math.round(Number(n) * 10) / 10;
@@ -402,7 +507,7 @@ function focalRangeScore(lens, stats) {
 }
 
 function roadmapExifEnabled() {
-  return $("showRoadmapExifHeatmap")?.checked && (exifAnalysis.result?.lenses || []).length > 0;
+  return (exifAnalysis.result?.lenses || []).length > 0;
 }
 
 function roadmapExifStatsForLens(lens) {
@@ -427,15 +532,20 @@ function roadmapExifStatsForLens(lens) {
   return bestScore >= 2 ? best : null;
 }
 
-function roadmapMaxLensTotal() {
-  return Math.max(1, ...(exifAnalysis.result?.lenses || []).map(lens => Number(lens.total) || 0));
+function heatMaxForResult(result = exifAnalysis.result) {
+  const values = [];
+  (result?.lenses || []).forEach(lens => {
+    values.push(Number(lens.total) || 0);
+    Object.values(lens.focalCounts || {}).forEach(count => values.push(Number(count) || 0));
+  });
+  return Math.max(1, ...values);
 }
 
 function heatColor(count, max) {
+  const settings = currentVisualSettings();
   const ratio = clamp((Number(count) || 0) / Math.max(1, Number(max) || 1), 0, 1);
-  const hue = 220 - ratio * 220;
-  const light = 52 - ratio * 7;
-  return `hsl(${hue}, 86%, ${light}%)`;
+  const smooth = Math.pow(ratio, .72);
+  return mixColor(settings.heatLowColor, settings.heatHighColor, smooth);
 }
 
 function activeTeleconverters() {
@@ -458,7 +568,7 @@ function focalEntriesForLens(lens, stats) {
 function ensureExifRoadmapStyle() {
   const existing = state.styles.find(style => style.id === "exif-imported" || style.name.toLowerCase() === "exif imported");
   if (existing) return existing;
-  const style = { id: "exif-imported", name: "EXIF Imported", color: "#2563EB", dash: "solid", width: 6, weight: 850 };
+  const style = { id: "exif-imported", name: "EXIF Imported", color: currentVisualSettings().rangeFallbackColor, dash: "solid", width: 6, weight: 850 };
   state.styles.push(style);
   return style;
 }
@@ -492,12 +602,12 @@ function applyExifStatsToRoadmap(options = {}) {
   const lenses = exifAnalysis.result?.lenses || [];
   if (!lenses.length) {
     if (!silent) toast("적용할 EXIF 분석 결과가 없습니다.");
-    return { added: 0, updated: 0, skipped: 0 };
+    return { added: 0, replaced: 0, skipped: 0 };
   }
 
+  const fallbackCrop = singleChartCrop() || 1;
   let style = null;
-  let added = 0;
-  let updated = 0;
+  const nextLenses = [];
   let skipped = 0;
 
   lenses.forEach(stats => {
@@ -509,28 +619,13 @@ function applyExifStatsToRoadmap(options = {}) {
       return;
     }
 
-    const mount = ensureExifRoadmapMount(stats.cropEstimate || singleChartCrop() || 1);
+    const mount = ensureExifRoadmapMount(stats.cropEstimate || fallbackCrop);
     const start = Math.min(Number(rawStart), Number(rawEnd));
     const end = Math.max(Number(rawStart), Number(rawEnd));
     const type = parsedRange?.type || (Math.abs(start - end) < 0.05 ? "prime" : "zoom");
-    const existing = findRoadmapLensForExif(stats);
-
-    if (existing) {
-      existing.name = stats.lensName || existing.name;
-      existing.mountId = mount.id;
-      if (!existing.styleId) {
-        style = style || ensureExifRoadmapStyle();
-        existing.styleId = style.id;
-      }
-      existing.start = start;
-      existing.end = end;
-      existing.type = type;
-      updated += 1;
-      return;
-    }
-
     style = style || ensureExifRoadmapStyle();
-    state.lenses.push({
+
+    nextLenses.push({
       id: uid(),
       mountId: mount.id,
       type,
@@ -541,18 +636,22 @@ function applyExifStatsToRoadmap(options = {}) {
       tc14: false,
       tc20: false
     });
-    added += 1;
   });
 
-  if (added || updated) {
-    saveState();
-    if (render) renderAll();
+  if (!nextLenses.length) {
+    if (!silent) toast(`로드맵으로 만들 수 있는 EXIF 렌즈가 없습니다. ${skipped}개를 건너뛰었습니다.`);
+    return { added: 0, replaced: 0, skipped };
   }
 
+  const replaced = state.lenses.length;
+  state.lenses = nextLenses;
+  saveState();
+  if (render) renderAll();
+
   if (!silent) {
-    toast(`EXIF 렌즈 ${added}개 추가, ${updated}개 업데이트, ${skipped}개 건너뜀`);
+    toast(`기존 렌즈 ${replaced}개를 지우고 EXIF 렌즈 ${nextLenses.length}개로 로드맵을 만들었습니다.`);
   }
-  return { added, updated, skipped };
+  return { added: nextLenses.length, replaced, skipped };
 }
 
 function chartRows() {
@@ -582,6 +681,7 @@ function resolvedAxisLabelMode(requestedMode, crop) {
 function renderChart() {
   const svg = $("chart");
   svg.innerHTML = "";
+  const visual = currentVisualSettings();
 
   const rows = chartRows();
   const emptyState = $("emptyState");
@@ -612,7 +712,7 @@ function renderChart() {
   svg.setAttribute("width", width);
   svg.setAttribute("height", height);
 
-  makeEl(svg, "rect", { x: 0, y: 0, width, height, fill: "#FFFFFF" });
+  makeEl(svg, "rect", { x: 0, y: 0, width, height, fill: visual.chartBackgroundColor });
   const defs = makeEl(svg, "defs", {});
 
   const title = $("chartTitle").value.trim() || "Lens Roadmap";
@@ -652,28 +752,28 @@ function renderChart() {
   });
   const labelTickSet = new Set(labeledTicks.map(item => item.t));
 
-  makeText(svg, { x: labelColumnX, y: axisTop + 4, "font-size": 12, "font-weight": 800, "text-anchor": "middle", fill: "#111827" }, labelMode === "equiv" ? "35mm equivalent" : "focal length");
+  makeText(svg, { x: labelColumnX, y: axisTop + 4, "font-size": 12, "font-weight": 800, "text-anchor": "middle", fill: visual.chartTextColor }, labelMode === "equiv" ? "35mm equivalent" : "focal length");
   if (labelMode === "both") {
-    makeText(svg, { x: labelColumnX, y: axisTop + 24, "font-size": 10, "font-weight": 700, "text-anchor": "middle", fill: "#111827" }, "(35mm equivalent)");
+    makeText(svg, { x: labelColumnX, y: axisTop + 24, "font-size": 10, "font-weight": 700, "text-anchor": "middle", fill: visual.chartTextColor }, "(35mm equivalent)");
   }
 
   ticks.forEach(t => {
     const px = leftChart + x(t);
     const pair = crop ? axisPair(t, crop) : { actual: t, equiv: t };
-    makeEl(svg, "line", { x1: px, y1: plotTop, x2: px, y2: plotBottom, stroke: "#BEBEBE", "stroke-width": 1.2, "stroke-dasharray": "5 7" });
+    makeEl(svg, "line", { x1: px, y1: plotTop, x2: px, y2: plotBottom, stroke: visual.chartGridColor, "stroke-width": 1.2, "stroke-dasharray": "5 7" });
     if (!labelTickSet.has(t)) return;
     if (labelMode === "both") {
-      makeText(svg, { x: px, y: axisTop, "font-size": 16, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, `${clean(pair.actual)}mm`);
-      makeText(svg, { x: px, y: axisTop + 20, "font-size": 11, "font-weight": 750, "text-anchor": "middle", fill: "#111111" }, `${clean(pair.equiv)}mm`);
+      makeText(svg, { x: px, y: axisTop, "font-size": 16, "font-weight": 850, "text-anchor": "middle", fill: visual.chartTextColor }, `${clean(pair.actual)}mm`);
+      makeText(svg, { x: px, y: axisTop + 20, "font-size": 11, "font-weight": 750, "text-anchor": "middle", fill: visual.chartTextColor }, `${clean(pair.equiv)}mm`);
     } else if (labelMode === "equiv") {
-      makeText(svg, { x: px, y: axisTop + 8, "font-size": 16, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, `${clean(pair.equiv)}mm`);
+      makeText(svg, { x: px, y: axisTop + 8, "font-size": 16, "font-weight": 850, "text-anchor": "middle", fill: visual.chartTextColor }, `${clean(pair.equiv)}mm`);
     } else {
-      makeText(svg, { x: px, y: axisTop + 8, "font-size": 16, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, `${clean(pair.actual)}mm`);
+      makeText(svg, { x: px, y: axisTop + 8, "font-size": 16, "font-weight": 850, "text-anchor": "middle", fill: visual.chartTextColor }, `${clean(pair.actual)}mm`);
     }
   });
 
-  makeEl(svg, "rect", { x: plotLeft, y: plotTop, width: plotRight - plotLeft, height: plotBottom - plotTop, fill: "none", stroke: "#4B4B4B", "stroke-width": 2 });
-  makeEl(svg, "line", { x1: leftType, y1: plotTop, x2: leftType, y2: plotBottom, stroke: "#4B4B4B", "stroke-width": 2 });
+  makeEl(svg, "rect", { x: plotLeft, y: plotTop, width: plotRight - plotLeft, height: plotBottom - plotTop, fill: "none", stroke: visual.chartLineColor, "stroke-width": 2 });
+  makeEl(svg, "line", { x1: leftType, y1: plotTop, x2: leftType, y2: plotBottom, stroke: visual.chartLineColor, "stroke-width": 2 });
 
   let y = plotTop;
   const deferredOverlays = [];
@@ -687,8 +787,8 @@ function renderChart() {
     const { type, items } = row;
     const isZoom = type === "zoom";
     const blockH = isZoom ? Math.max(196, items.length * rowH + 44) : Math.max(138, items.length * primeRowH + 44);
-    makeEl(svg, "rect", { x: plotLeft, y, width: plotRight - plotLeft, height: blockH, fill: "#FFFFFF", stroke: "#4B4B4B", "stroke-width": 1.4 });
-    makeText(svg, { x: labelColumnX, y: y + blockH / 2 + 6, "font-size": 19, "font-weight": 850, "text-anchor": "middle", fill: "#111111" }, categoryLabel(type));
+    makeEl(svg, "rect", { x: plotLeft, y, width: plotRight - plotLeft, height: blockH, fill: visual.plotBackgroundColor, stroke: visual.chartLineColor, "stroke-width": 1.4 });
+    makeText(svg, { x: labelColumnX, y: y + blockH / 2 + 6, "font-size": 19, "font-weight": 850, "text-anchor": "middle", fill: visual.chartTextColor }, categoryLabel(type));
 
     const plottedItems = items.map((lens, idx) => {
       const style = styleById(lens.styleId);
@@ -697,7 +797,7 @@ function renderChart() {
       const startX = clamp(leftChart + x(start), leftChart, leftChart + chartW);
       const endX = clamp(leftChart + x(end), leftChart, leftChart + chartW);
       const label = shortText(chartLensName(lens.name), isZoom ? 46 : 24);
-      const color = style.name.toLowerCase().includes("standard") ? "#9A9A9A" : "#1F1F1F";
+      const color = normalizeHexColor(style.color, visual.rangeFallbackColor);
       const cy = isZoom ? y + 33 + idx * rowH : y + 31 + idx * primeRowH;
       const exifStats = roadmapExifStatsForLens(lens);
       return { lens, idx, style, start, end, startX, endX, label, color, cy, exifStats };
@@ -723,24 +823,24 @@ function renderChart() {
         const anchor = labelFitsRight ? "start" : "end";
         const maskX = anchor === "start" ? labelX - 3 : labelX - labelW - 3;
         const redraw = () => {
-          const primeColor = exifStats ? heatColor(exifStats.total, roadmapMaxLensTotal()) : color;
-          makeEl(svg, "circle", { cx: startX, cy, r: exifStats ? 5.7 : 4.5, fill: primeColor, stroke: exifStats ? "#FFFFFF" : "", "stroke-width": exifStats ? 1.5 : "" });
-          makeEl(svg, "rect", { x: maskX, y: cy - 9, width: labelW + 6, height: 15, fill: "#FFFFFF" });
-          makeText(svg, { x: labelX, y: cy + 4, "font-size": 10.8, "font-weight": 850, "text-anchor": anchor, fill: "#111111" }, label);
+          const primeColor = exifStats ? heatColor(exifStats.total, heatMaxForResult()) : color;
+          makeEl(svg, "circle", { cx: startX, cy, r: exifStats ? 5.7 : 4.5, fill: primeColor, stroke: exifStats ? visual.chartBackgroundColor : "", "stroke-width": exifStats ? 1.5 : "" });
+          makeEl(svg, "rect", { x: maskX, y: cy - 9, width: labelW + 6, height: 15, fill: visual.plotBackgroundColor });
+          makeText(svg, { x: labelX, y: cy + 4, "font-size": 10.8, "font-weight": 850, "text-anchor": anchor, fill: visual.chartTextColor }, label);
         };
         deferredOverlays.push(redraw);
         return;
       }
 
       makeEl(svg, "rect", { x: startX - 6, y: cy - 5, width: 8, height: 10, fill: color });
-      const heatDrawn = exifStats ? drawZoomHeatmapLine(svg, defs, item, exifStats, leftChart, chartW, x) : false;
+      const heatDrawn = exifStats ? drawZoomHeatmapLine(svg, defs, item, exifStats, leftChart, chartW, x, heatMaxForResult()) : false;
       if (!heatDrawn) {
         makeEl(svg, "line", { x1: startX, y1: cy, x2: endX, y2: cy, stroke: color, "stroke-width": Number(style.width) + 1, "stroke-linecap": "butt", "stroke-dasharray": dashArray(style) });
       }
       const labelW = textWidth(label, 104, 250, 6.1);
       const labelX = clamp(startX + 9, leftChart + 7, plotRight - labelW - 5);
-      makeEl(svg, "rect", { x: labelX - 3, y: cy + 8, width: labelW, height: 16, fill: "#FFFFFF" });
-      makeText(svg, { x: labelX, y: cy + 20, "font-size": 11.5, "font-weight": style.weight, fill: "#111111" }, label);
+      makeEl(svg, "rect", { x: labelX - 3, y: cy + 8, width: labelW, height: 16, fill: visual.plotBackgroundColor });
+      makeText(svg, { x: labelX, y: cy + 20, "font-size": 11.5, "font-weight": style.weight, fill: visual.chartTextColor }, label);
 
       if ($("showTeleconverters").checked) {
         if (lens.tc14) drawTc(svg, leftChart, chartW, x, endX, cy - 2, end * 1.4, max, "#B9A37C", "", "");
@@ -752,7 +852,7 @@ function renderChart() {
   });
   drawDeferredOverlays();
 
-  makeText(svg, { x: plotLeft + 4, y: height - 16, "font-size": 11, "font-weight": 800, fill: "#111111" }, "As of current data");
+  makeText(svg, { x: plotLeft + 4, y: height - 16, "font-size": 11, "font-weight": 800, fill: visual.chartTextColor }, "As of current data");
 
   let lx = width - 320;
   const legendY = height - 14;
@@ -762,24 +862,24 @@ function renderChart() {
     let tcX = tcLegendX;
     if (teleconverters.tc14) {
       makeEl(svg, "line", { x1: tcX, y1: legendY - 4, x2: tcX + 28, y2: legendY - 4, stroke: "#B9A37C", "stroke-width": 4, "stroke-linecap": "butt" });
-      makeText(svg, { x: tcX + 35, y: legendY, "font-size": 11, "font-weight": 850, fill: "#111111" }, "1.4x TC");
+      makeText(svg, { x: tcX + 35, y: legendY, "font-size": 11, "font-weight": 850, fill: visual.chartTextColor }, "1.4x TC");
       tcX += 100;
     }
     if (teleconverters.tc20) {
       makeEl(svg, "line", { x1: tcX, y1: legendY - 4, x2: tcX + 28, y2: legendY - 4, stroke: "#6F7C85", "stroke-width": 4, "stroke-linecap": "butt" });
-      makeText(svg, { x: tcX + 35, y: legendY, "font-size": 11, "font-weight": 850, fill: "#111111" }, "2x TC");
+      makeText(svg, { x: tcX + 35, y: legendY, "font-size": 11, "font-weight": 850, fill: visual.chartTextColor }, "2x TC");
     }
   }
   if (roadmapExifEnabled()) {
     const heatX = plotLeft + 300;
-    makeEl(svg, "line", { x1: heatX, y1: legendY - 4, x2: heatX + 26, y2: legendY - 4, stroke: heatColor(1, 10), "stroke-width": 5, "stroke-linecap": "butt" });
+    makeEl(svg, "line", { x1: heatX, y1: legendY - 4, x2: heatX + 26, y2: legendY - 4, stroke: heatColor(0, 10), "stroke-width": 5, "stroke-linecap": "butt" });
     makeEl(svg, "line", { x1: heatX + 26, y1: legendY - 4, x2: heatX + 52, y2: legendY - 4, stroke: heatColor(10, 10), "stroke-width": 5, "stroke-linecap": "butt" });
-    makeText(svg, { x: heatX + 60, y: legendY, "font-size": 11, "font-weight": 850, fill: "#111111" }, "EXIF heatmap low → high");
+    makeText(svg, { x: heatX + 60, y: legendY, "font-size": 11, "font-weight": 850, fill: visual.chartTextColor }, "EXIF heatmap low → high");
   }
   state.styles.forEach(style => {
-    const color = style.name.toLowerCase().includes("standard") ? "#9A9A9A" : "#1F1F1F";
+    const color = normalizeHexColor(style.color, visual.rangeFallbackColor);
     makeEl(svg, "rect", { x: lx, y: legendY - 8, width: 9, height: 9, fill: color });
-    makeText(svg, { x: lx + 15, y: legendY, "font-size": 12, "font-weight": 850, fill: "#111111", "font-style": "italic" }, style.name);
+    makeText(svg, { x: lx + 15, y: legendY, "font-size": 12, "font-weight": 850, fill: visual.chartTextColor, "font-style": "italic" }, style.name);
     lx += Math.max(82, style.name.length * 7 + 34);
   });
 }
@@ -791,10 +891,11 @@ function drawTc(svg, leftChart, chartW, x, startX, y, tcEnd, max, color, dash, l
   if (label) makeText(svg, { x: tcX + 8, y: y + 4, "font-size": 10, "font-weight": 800, fill: "#64748B" }, label);
 }
 
-function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x) {
+function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatMax) {
   const entries = focalEntriesForLens(item.lens, stats);
   if (!entries.length) return false;
 
+  const visual = currentVisualSettings();
   const lensStart = Number(item.lens.start);
   const lensEnd = Number(item.lens.end);
   const lineStart = Math.min(item.startX, item.endX);
@@ -802,7 +903,7 @@ function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x) {
   const lineW = lineEnd - lineStart;
   if (lineW <= 1) return false;
 
-  const maxCount = Math.max(1, ...entries.map(entry => entry.count));
+  const maxCount = Math.max(1, Number(heatMax) || heatMaxForResult());
   const width = Math.max(6, Number(item.style.width) + 3);
   const gradientId = `heat-${String(item.lens.id || uid()).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
   const gradient = makeEl(defs, "linearGradient", {
@@ -825,8 +926,10 @@ function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x) {
     .sort((a, b) => a.offset - b.offset);
 
   if (!stops.length) return false;
-  if (stops[0].offset > 0) stops.unshift({ offset: 0, color: stops[0].color });
-  if (stops[stops.length - 1].offset < 100) stops.push({ offset: 100, color: stops[stops.length - 1].color });
+  if (entries[0].focal > lensStart + .2) stops.unshift({ offset: 0, color: heatColor(0, maxCount) });
+  else if (stops[0].offset > 0) stops.unshift({ offset: 0, color: stops[0].color });
+  if (entries[entries.length - 1].focal < lensEnd - .2) stops.push({ offset: 100, color: heatColor(0, maxCount) });
+  else if (stops[stops.length - 1].offset < 100) stops.push({ offset: 100, color: stops[stops.length - 1].color });
 
   stops.forEach(stop => {
     makeEl(gradient, "stop", {
@@ -841,7 +944,7 @@ function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x) {
     y1: item.cy,
     x2: lineEnd,
     y2: item.cy,
-    stroke: "#D8E5F6",
+    stroke: visual.heatLowColor,
     "stroke-width": width + 1,
     "stroke-linecap": "butt",
     opacity: .72
@@ -1088,7 +1191,7 @@ function renderExifHeatmap(result) {
   table.appendChild(thead);
 
   const tbody = document.createElement("tbody");
-  const maxCell = Math.max(1, result.maxCellCount || 1);
+  const maxCell = heatMaxForResult(result);
   lenses.forEach(lens => {
     const row = document.createElement("tr");
     const nameCell = document.createElement("td");
@@ -1099,8 +1202,9 @@ function renderExifHeatmap(result) {
       const cell = document.createElement("td");
       cell.className = count ? "heatmap-cell" : "heatmap-cell empty";
       if (count) {
-        const heat = Math.min(.92, .14 + (count / maxCell) * .78);
-        cell.style.setProperty("--heat", heat.toFixed(3));
+        const color = heatColor(count, maxCell);
+        cell.style.background = color;
+        cell.style.color = contrastColor(color);
         cell.textContent = formatCount(count);
         cell.title = `${lens.lensName} · ${column}mm · ${formatCount(count)} files`;
       }
@@ -1238,10 +1342,11 @@ function startExifWorker(files) {
     if (message.type === "done") {
       exifAnalysis.summary = message.summary;
       exifAnalysis.result = message.result || { lenses: [], focalColumns: [], maxCellCount: 0 };
+      saveStoredExifResult(exifAnalysis.result);
       exifAnalysis.running = false;
       exifAnalysis.worker = null;
       const applied = applyExifStatsToRoadmap({ silent: true, render: false });
-      exifAnalysis.status = `분석 완료: ${formatCount(message.summary.processed)}개 사진, 렌즈 감지 ${formatCount(message.summary.withLens)}개, 초점거리 감지 ${formatCount(message.summary.withFocal)}개. 로드맵 ${formatCount(applied.added)}개 추가, ${formatCount(applied.updated)}개 업데이트.`;
+      exifAnalysis.status = `분석 완료: ${formatCount(message.summary.processed)}개 사진, 렌즈 감지 ${formatCount(message.summary.withLens)}개, 초점거리 감지 ${formatCount(message.summary.withFocal)}개. 기존 렌즈 ${formatCount(applied.replaced)}개를 지우고 EXIF 렌즈 ${formatCount(applied.added)}개로 로드맵을 만들었습니다.`;
       worker.terminate();
       renderAll();
       switchTab("Exif");
@@ -1304,8 +1409,10 @@ function clearExifCache() {
   const request = indexedDB.deleteDatabase("lensRoadmapExifCacheV1");
   request.onsuccess = () => {
     exifAnalysis.summary.cacheHits = 0;
+    exifAnalysis.result = emptyExifResult();
+    saveStoredExifResult(exifAnalysis.result);
     exifAnalysis.status = "EXIF 캐시를 초기화했습니다. 다음 분석에서는 JPEG를 다시 읽습니다.";
-    renderExifAnalysis();
+    renderAll();
     toast("EXIF 캐시를 초기화했습니다.");
   };
   request.onerror = () => {
@@ -1337,7 +1444,18 @@ function renderTables() {
       const swatch = document.createElement("div");
       swatch.className = "color-swatch";
       swatch.style.background = m.color;
-      row.querySelector(".mount-color").appendChild(swatch);
+      const input = document.createElement("input");
+      input.type = "color";
+      input.className = "table-color";
+      input.value = normalizeHexColor(m.color, "#111827");
+      input.addEventListener("input", () => {
+        m.color = normalizeHexColor(input.value, m.color);
+        swatch.style.background = m.color;
+        saveState();
+        renderMountSummary();
+        renderChart();
+      });
+      row.querySelector(".mount-color").append(swatch, input);
       row.querySelector("button").addEventListener("click", () => deleteMount(m.id));
       mountBody.appendChild(row);
     });
@@ -1351,7 +1469,19 @@ function renderTables() {
       const row = styleTmpl.content.cloneNode(true);
       row.querySelector(".style-name").textContent = style.name;
       row.querySelector(".style-count").textContent = `${state.lenses.filter(l => l.styleId === style.id).length}개`;
-      row.querySelector(".style-preview-cell").appendChild(stylePreview(style));
+      const preview = stylePreview(style);
+      const input = document.createElement("input");
+      input.type = "color";
+      input.className = "table-color";
+      input.value = normalizeHexColor(style.color, "#667085");
+      input.addEventListener("input", () => {
+        style.color = normalizeHexColor(input.value, style.color);
+        const line = preview.querySelector("line");
+        if (line) line.setAttribute("stroke", style.color);
+        saveState();
+        renderChart();
+      });
+      row.querySelector(".style-preview-cell").append(preview, input);
       row.querySelector(".style-dash").textContent = style.dash === "solid" ? "실선" : style.dash === "dash" ? "긴 점선" : "짧은 점선";
       row.querySelector(".style-width").textContent = style.width;
       row.querySelector("button").addEventListener("click", () => deleteStyle(style.id));
@@ -1685,9 +1815,9 @@ function exportJson() {
       axisMin: Number($("axisMin").value),
       axisMax: Number($("axisMax").value),
       showTeleconverters: $("showTeleconverters").checked,
-      showZoomGuides: $("showZoomGuides").checked,
-      showRoadmapExifHeatmap: $("showRoadmapExifHeatmap").checked
+      showZoomGuides: $("showZoomGuides").checked
     },
+    visualSettings: currentVisualSettings(),
     ...state
   };
   downloadBlob(JSON.stringify(data, null, 2), "lens-roadmap-data.json", "application/json;charset=utf-8");
@@ -1724,7 +1854,11 @@ function importJson(file) {
         $("axisMax").value = data.settings.axisMax || 1600;
         $("showTeleconverters").checked = data.settings.showTeleconverters ?? true;
         $("showZoomGuides").checked = data.settings.showZoomGuides ?? true;
-        $("showRoadmapExifHeatmap").checked = data.settings.showRoadmapExifHeatmap ?? true;
+      }
+      if (data.visualSettings) {
+        visualSettings = Object.fromEntries(Object.entries(defaultVisualSettings).map(([key, fallback]) => [key, normalizeHexColor(data.visualSettings[key], fallback)]));
+        saveVisualSettings();
+        applyVisualSettingsToDom();
       }
       saveState();
       renderAll();
@@ -2008,7 +2142,7 @@ function bind() {
     renderAll();
   });
 
-  ["displayMode", "labelMode", "scaleMode", "chartTitle", "autoCropAxis", "axisMin", "axisMax", "showTeleconverters", "showZoomGuides", "showRoadmapExifHeatmap"].forEach(id => {
+  ["displayMode", "labelMode", "scaleMode", "chartTitle", "autoCropAxis", "axisMin", "axisMax", "showTeleconverters", "showZoomGuides"].forEach(id => {
     $(id).addEventListener("input", () => {
       renderChart();
       updateLensPreview();
@@ -2019,6 +2153,17 @@ function bind() {
     });
   });
 
+  Object.keys(defaultVisualSettings).forEach(id => {
+    const node = $(id);
+    if (!node) return;
+    node.addEventListener("input", () => {
+      visualSettings = readVisualSettingsFromDom();
+      saveVisualSettings();
+      renderChart();
+      renderExifHeatmap(exifAnalysis.result);
+    });
+  });
+
   $("tabMounts").addEventListener("click", () => switchTab("Mounts"));
   $("tabStyles").addEventListener("click", () => switchTab("Styles"));
   $("tabLenses").addEventListener("click", () => switchTab("Lenses"));
@@ -2026,4 +2171,5 @@ function bind() {
 }
 
 bind();
+applyVisualSettingsToDom();
 renderAll();

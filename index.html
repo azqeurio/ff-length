@@ -126,10 +126,6 @@
               <div class="progress-bar"><span id="photoExifProgressBar"></span></div>
             </div>
           </div>
-          <div class="toggle-row">
-            <label class="switch" aria-label="로드맵 EXIF 히트맵 표시"><input id="showRoadmapExifHeatmap" type="checkbox" checked><span></span></label>
-            <div><strong>로드맵에 히트맵 표시</strong><p>EXIF 분석 결과와 렌즈명이 맞으면 단렌즈 점과 줌렌즈 선을 blue→red 사용량 색으로 표시합니다.</p></div>
-          </div>
           <div id="photoAnalysisStatus" class="lens-preview">사진은 업로드되지 않습니다. EXIF와 분석 결과는 이 브라우저의 IndexedDB 캐시에만 저장됩니다.</div>
         </section>
 
@@ -189,6 +185,17 @@
           <div class="toggle-row">
             <label class="switch" aria-label="줌렌즈 시작 끝 가이드 표시"><input id="showZoomGuides" type="checkbox" checked><span></span></label>
             <div><strong>줌 시작/끝 가이드 표시</strong><p>줌렌즈의 시작과 끝 위치를 위쪽 점선으로 올려 정확히 보여줍니다.</p></div>
+          </div>
+
+          <div class="color-control-grid">
+            <label class="field"><span>히트맵 낮은 사용</span><input id="heatLowColor" type="color" value="#FFFFFF" /></label>
+            <label class="field"><span>히트맵 높은 사용</span><input id="heatHighColor" type="color" value="#DC2626" /></label>
+            <label class="field"><span>전체 바탕색</span><input id="chartBackgroundColor" type="color" value="#FFFFFF" /></label>
+            <label class="field"><span>로드맵 바탕색</span><input id="plotBackgroundColor" type="color" value="#FFFFFF" /></label>
+            <label class="field"><span>축/테두리 색</span><input id="chartLineColor" type="color" value="#4B4B4B" /></label>
+            <label class="field"><span>눈금 점선 색</span><input id="chartGridColor" type="color" value="#BEBEBE" /></label>
+            <label class="field"><span>기본 화각 범위 색</span><input id="rangeFallbackColor" type="color" value="#111111" /></label>
+            <label class="field"><span>텍스트 색</span><input id="chartTextColor" type="color" value="#111111" /></label>
           </div>
         </section>
 
