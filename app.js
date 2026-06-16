@@ -318,7 +318,27 @@ function dashArray(style) {
 
 function cropForLens(lens) {
   const mount = mountById(lens.mountId);
+  const inferredCrop = inferredCropForLensName(lens.name);
+  const isExifMount = String(mount?.id || "").startsWith("exif-crop-") || /^EXIF crop/i.test(mount?.name || "") || lens.styleId === "exif-imported";
+  if (isExifMount && inferredCrop) return inferredCrop;
   return Math.max(0.1, toNumber(mount?.crop, 1));
+}
+
+function inferredCropForLensName(name) {
+  const text = String(name || "").toLowerCase();
+  if (!text) return null;
+  if (/\b(lumix\s+s|lumix\s+s\s+pro|sigma\s+s|leica\s+sl|sony\s+fe|nikon\s+z|canon\s+rf)\b/.test(text)) return null;
+  if (/(?:^|\b)(m\.?\s*zuiko|olympus\s+m\.?\s*\d+|olympus\s+m\s+\d+|om\s+\d+|om-system|om system|leica\s+dg|lumix\s+g|panasonic\s+g)(?:\b|$)/.test(text)) return 2;
+  return null;
+}
+
+function normalizedCropEstimate(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return null;
+  const known = [1, 1.5, 1.6, 2, 2.7];
+  const close = known.find(crop => Math.abs(crop - number) <= 0.16);
+  if (close) return close;
+  return number >= 0.8 && number <= 3.1 ? Math.round(number * 10) / 10 : null;
 }
 
 function chartCropValues() {
@@ -331,6 +351,20 @@ function chartCropValues() {
 function singleChartCrop() {
   const crops = chartCropValues();
   return crops.length === 1 ? crops[0] : null;
+}
+
+function representativeChartCrop() {
+  const crops = state.lenses
+    .map(lens => Math.round(cropForLens(lens) * 1000) / 1000)
+    .filter(crop => Number.isFinite(crop) && crop > 0);
+  if (!crops.length) return null;
+  const counts = new Map();
+  crops.forEach(crop => counts.set(crop, (counts.get(crop) || 0) + 1));
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0][0];
+}
+
+function chartReferenceCrop() {
+  return singleChartCrop() || representativeChartCrop() || 1;
 }
 
 function displayValue(lens, value) {
@@ -473,7 +507,7 @@ function axisPresetValue(value) {
 }
 
 function axisPresetValues(presets) {
-  const crop = singleChartCrop();
+  const crop = chartReferenceCrop();
   if ($("displayMode").value === "equiv" && crop) {
     return presets.map(value => axisPresetValue(value * crop));
   }
@@ -665,13 +699,17 @@ function heatMaxForResult(result = exifAnalysis.result) {
   return Math.max(1, ...values);
 }
 
+function heatRatio(count, max, minVisible = 0) {
+  const value = Number(count) || 0;
+  if (value <= 0) return 0;
+  const baseRatio = clamp(value / Math.max(1, Number(max) || 1), 0, 1);
+  const emphasized = Math.pow(baseRatio, .44);
+  return Math.max(emphasized, minVisible);
+}
+
 function heatColor(count, max, minVisible = 0) {
   const settings = currentVisualSettings();
-  const value = Number(count) || 0;
-  const baseRatio = clamp(value / Math.max(1, Number(max) || 1), 0, 1);
-  const ratio = value > 0 && minVisible ? Math.max(baseRatio, minVisible) : baseRatio;
-  const smooth = Math.pow(ratio, .72);
-  return mixColor(settings.heatLowColor, settings.heatHighColor, smooth);
+  return mixColor(settings.heatLowColor, settings.heatHighColor, heatRatio(count, max, minVisible));
 }
 
 function activeTeleconverters() {
@@ -740,7 +778,7 @@ function applyExifStatsToRoadmap(options = {}) {
     return { added: 0, replaced: 0, skipped: 0 };
   }
 
-  const fallbackCrop = singleChartCrop() || 1;
+  const fallbackCrop = chartReferenceCrop();
   let style = null;
   const nextLenses = [];
   let skipped = 0;
@@ -754,7 +792,8 @@ function applyExifStatsToRoadmap(options = {}) {
       return;
     }
 
-    const mount = ensureExifRoadmapMount(stats.cropEstimate || fallbackCrop);
+    const crop = inferredCropForLensName(stats.lensName) || normalizedCropEstimate(stats.cropEstimate) || fallbackCrop;
+    const mount = ensureExifRoadmapMount(crop);
     const start = Math.min(Number(rawStart), Number(rawEnd));
     const end = Math.max(Number(rawStart), Number(rawEnd));
     const type = parsedRange?.type || (Math.abs(start - end) < 0.05 ? "prime" : "zoom");
@@ -809,8 +848,7 @@ function axisPair(value, crop) {
 }
 
 function resolvedAxisLabelMode(requestedMode, crop) {
-  if (crop) return requestedMode;
-  return $("displayMode").value === "equiv" ? "equiv" : "actual";
+  return requestedMode || ($("displayMode").value === "equiv" ? "equiv" : "actual");
 }
 
 function renderChart() {
@@ -834,7 +872,7 @@ function renderChart() {
   const right = 64;
   const width = 1320;
   const footerH = 34;
-  const crop = singleChartCrop();
+  const crop = chartReferenceCrop();
 
   let contentH = 0;
   rows.forEach(row => {
@@ -1062,12 +1100,22 @@ function interpolateHeatCount(offset, stops) {
   return stops[stops.length - 1].count;
 }
 
+function smoothedHeatCount(offset, stops, sigma) {
+  if (!stops.length) return 0;
+  const spread = Math.max(.5, Number(sigma) || 4);
+  return stops.reduce((sum, stop) => {
+    const distance = offset - stop.offset;
+    const weight = Math.exp(-0.5 * (distance / spread) ** 2);
+    return sum + stop.count * weight;
+  }, 0);
+}
+
 function drawZoomFallbackHeatLine(svg, item, stats, heatMax) {
   const lineStart = Math.min(item.startX, item.endX);
   const lineEnd = Math.max(item.startX, item.endX);
   if (lineEnd <= lineStart + 1) return;
-  const width = Math.max(6, Number(item.style.width) + 3);
-  const color = heatColor(stats?.total || 0, heatMax, .08);
+  const width = Math.max(7, Number(item.style.width) + 5);
+  const color = heatColor(stats?.total || 0, heatMax, .16);
   makeEl(svg, "line", {
     x1: lineStart,
     y1: item.cy,
@@ -1092,8 +1140,8 @@ function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatM
   if (lineW <= 1) return false;
 
   const maxCount = Math.max(1, Number(heatMax) || heatMaxForResult());
-  const width = Math.max(6, Number(item.style.width) + 3);
-  const stops = entries
+  const width = Math.max(7, Number(item.style.width) + 5);
+  const measuredStops = entries
     .map(entry => {
       const px = clamp(leftChart + x(displayValue(item.lens, entry.focal)), lineStart, lineEnd);
       return {
@@ -1103,6 +1151,7 @@ function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatM
     })
     .sort((a, b) => a.offset - b.offset);
 
+  const stops = measuredStops.slice();
   if (!stops.length) return false;
   if (entries[0].focal > lensStart + .2) stops.unshift({ offset: 0, count: 0 });
   else if (stops[0].offset > 0) stops.unshift({ offset: 0, count: stops[0].count });
@@ -1114,13 +1163,14 @@ function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatM
     y1: item.cy,
     x2: lineEnd,
     y2: item.cy,
-    stroke: visual.heatLowColor,
-    "stroke-width": width + 1,
+    stroke: heatColor(Math.max(maxCount * .008, (stats?.total || 0) * .012), maxCount, .07),
+    "stroke-width": width + 1.5,
     "stroke-linecap": "butt",
-    opacity: .72
+    opacity: .95
   });
 
-  const segments = Math.max(120, Math.min(720, Math.ceil(lineW / 2)));
+  const segments = Math.max(180, Math.min(900, Math.ceil(lineW / 1.35)));
+  const sigma = clamp(100 / Math.max(10, measuredStops.length * 1.65), 3.8, 9.5);
   for (let index = 0; index < segments; index += 1) {
     const offset1 = (index / segments) * 100;
     const offset2 = ((index + 1) / segments) * 100;
@@ -1132,7 +1182,7 @@ function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatM
       y1: item.cy,
       x2,
       y2: item.cy,
-      stroke: heatColor(interpolateHeatCount(midOffset, stops), maxCount, .055),
+      stroke: heatColor(smoothedHeatCount(midOffset, measuredStops, sigma), maxCount, .1),
       "stroke-width": width,
       "stroke-linecap": "butt"
     });
