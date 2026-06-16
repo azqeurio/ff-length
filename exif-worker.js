@@ -1,6 +1,6 @@
 importScripts("vendor/dexie.min.js", "vendor/exifr.full.umd.js");
 
-const DB_NAME = "lensRoadmapExifCacheV4";
+const DB_NAME = "lensRoadmapExifCacheV5";
 const BATCH_SIZE = 96;
 const UNKNOWN_LENS = "Unknown lens";
 const EXIF_PICK = [
@@ -22,6 +22,15 @@ const EXIF_PICK = [
   "FocalLenIn35mmFilm",
   "DigitalZoomRatio"
 ];
+const OLYMPUS_LENS_TYPES = {
+  "0 35 10": "Olympus M.Zuiko 100-400mm F5.0-6.3"
+};
+const OLYMPUS_EXTENDERS = {
+  "0 00": { name: "", factor: 1 },
+  "0 04": { name: "EC-14 1.4x Teleconverter", factor: 1.4 },
+  "0 08": { name: "EX-25 Extension Tube", factor: 1 },
+  "0 10": { name: "EC-20 2.0x Teleconverter", factor: 2 }
+};
 
 let cancelled = false;
 
@@ -92,6 +101,13 @@ function textValue(value) {
   return "";
 }
 
+function cleanExifText(text) {
+  return String(text || "")
+    .replace(/\0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function lensNameFrom(tags = {}) {
   const candidates = [tags.LensModel, tags.Lens, tags.LensID, tags.LensType];
   for (const candidate of candidates) {
@@ -99,6 +115,182 @@ function lensNameFrom(tags = {}) {
     if (text && text !== "0") return text;
   }
   return UNKNOWN_LENS;
+}
+
+function fileExtensionFromName(name) {
+  const match = String(name || "").toLowerCase().match(/\.([a-z0-9]+)$/);
+  return match ? match[1] : "";
+}
+
+async function readFileChunk(file, start, length) {
+  const end = Math.min(file.size || length, start + length);
+  const blob = file.slice ? file.slice(start, end) : file;
+  if (blob.arrayBuffer) return blob.arrayBuffer();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(blob);
+  });
+}
+
+function safeU16(view, offset, little) {
+  if (offset < 0 || offset + 2 > view.byteLength) return null;
+  return view.getUint16(offset, little);
+}
+
+function safeU32(view, offset, little) {
+  if (offset < 0 || offset + 4 > view.byteLength) return null;
+  return view.getUint32(offset, little);
+}
+
+function asciiFromView(view, offset, length) {
+  if (offset < 0 || offset >= view.byteLength || length <= 0) return "";
+  const end = Math.min(view.byteLength, offset + length);
+  let text = "";
+  for (let i = offset; i < end; i += 1) text += String.fromCharCode(view.getUint8(i));
+  return cleanExifText(text);
+}
+
+function tiffTypeSize(type) {
+  return {
+    1: 1,
+    2: 1,
+    3: 2,
+    4: 4,
+    5: 8,
+    7: 1,
+    8: 2,
+    9: 4,
+    10: 8,
+    11: 4,
+    12: 8,
+    13: 4
+  }[type] || 1;
+}
+
+function parseTiffIfd(view, offset, little, valueBase = 0) {
+  const count = safeU16(view, offset, little);
+  if (!count || count < 1 || count > 512) return null;
+  const entriesEnd = offset + 2 + count * 12;
+  if (entriesEnd > view.byteLength) return null;
+
+  const entries = new Map();
+  for (let index = 0; index < count; index += 1) {
+    const entryOffset = offset + 2 + index * 12;
+    const tag = safeU16(view, entryOffset, little);
+    const type = safeU16(view, entryOffset + 2, little);
+    const itemCount = safeU32(view, entryOffset + 4, little);
+    const value = safeU32(view, entryOffset + 8, little);
+    if (tag === null || type === null || itemCount === null || value === null) continue;
+    const byteLength = tiffTypeSize(type) * itemCount;
+    const valueOffset = byteLength <= 4 ? entryOffset + 8 : valueBase + value;
+    entries.set(tag, { tag, type, count: itemCount, value, valueOffset, byteLength, entryOffset });
+  }
+  return entries;
+}
+
+function readTiffBytes(view, entry) {
+  if (!entry || entry.valueOffset < 0 || entry.valueOffset >= view.byteLength) return [];
+  const length = Math.min(entry.byteLength, view.byteLength - entry.valueOffset);
+  return Array.from({ length }, (_, index) => view.getUint8(entry.valueOffset + index));
+}
+
+function readTiffAscii(view, entry) {
+  if (!entry) return "";
+  return asciiFromView(view, entry.valueOffset, entry.count || entry.byteLength || 0);
+}
+
+function readTiffShort(view, entry, little) {
+  if (!entry) return null;
+  if (entry.type === 3 || entry.type === 8) return safeU16(view, entry.valueOffset, little);
+  if (entry.type === 4 || entry.type === 13) return safeU32(view, entry.valueOffset, little);
+  if (entry.type === 1 || entry.type === 7) return view.getUint8(entry.valueOffset);
+  return null;
+}
+
+function hexByte(value) {
+  return Number(value || 0).toString(16).toUpperCase().padStart(2, "0").replace(/^0(?=[1-9A-F])/, "");
+}
+
+function olympusLensTypeKey(bytes) {
+  if (!bytes || bytes.length < 4) return "";
+  return `${bytes[0]} ${hexByte(bytes[2])} ${hexByte(bytes[3])}`;
+}
+
+function olympusExtenderKey(bytes) {
+  if (!bytes || bytes.length < 3) return "";
+  return `${bytes[0]} ${hexByte(bytes[2])}`;
+}
+
+function extenderFromText(text) {
+  const value = cleanExifText(text);
+  if (!value) return { name: "", factor: 1 };
+  const lower = value.toLowerCase();
+  if (/\b(mc|ec|tc)[\s_-]?14\b|1\.4x/.test(lower)) return { name: value, factor: 1.4 };
+  if (/\b(mc|ec|tc)[\s_-]?20\b|2\.0x|2x/.test(lower)) return { name: value, factor: 2 };
+  if (/1\.25x/.test(lower)) return { name: value, factor: 1.25 };
+  return { name: value, factor: 1 };
+}
+
+function findOlympusMakerRoot(view, makerOffset, little) {
+  const signature = asciiFromView(view, makerOffset, 16).toUpperCase();
+  const candidates = signature.startsWith("OM SYSTEM")
+    ? [makerOffset + 16, makerOffset + 12, makerOffset + 10]
+    : signature.startsWith("OLYMPUS")
+      ? [makerOffset + 12, makerOffset + 16, makerOffset + 10]
+      : [makerOffset + 16, makerOffset + 12, makerOffset + 10, makerOffset + 8];
+
+  for (const offset of candidates) {
+    const entries = parseTiffIfd(view, offset, little, makerOffset);
+    if (entries?.has(0x2010)) return entries;
+  }
+  return null;
+}
+
+async function parseOlympusRawMetadata(file) {
+  if (fileExtensionFromName(file?.name) !== "orf") return null;
+
+  const buffer = await readFileChunk(file, 0, Math.min(file.size || 0, 1024 * 1024));
+  const view = new DataView(buffer);
+  if (view.byteLength < 64) return null;
+
+  const byteOrder = asciiFromView(view, 0, 2);
+  const little = byteOrder === "II";
+  if (!little && byteOrder !== "MM") return null;
+
+  const ifd0Offset = safeU32(view, 4, little);
+  const ifd0 = parseTiffIfd(view, ifd0Offset, little, 0);
+  const exifOffset = ifd0?.get(0x8769)?.value;
+  const exifIfd = exifOffset ? parseTiffIfd(view, exifOffset, little, 0) : null;
+  const makerOffset = exifIfd?.get(0x927c)?.value;
+  if (!makerOffset || makerOffset >= view.byteLength) return null;
+
+  const root = findOlympusMakerRoot(view, makerOffset, little);
+  const equipmentPointer = root?.get(0x2010)?.value;
+  const equipment = equipmentPointer ? parseTiffIfd(view, makerOffset + equipmentPointer, little, makerOffset) : null;
+  if (!equipment) return null;
+
+  const lensModel = readTiffAscii(view, equipment.get(0x0203));
+  const lensTypeName = OLYMPUS_LENS_TYPES[olympusLensTypeKey(readTiffBytes(view, equipment.get(0x0201)))] || "";
+  const rawLensName = lensModel || lensTypeName;
+  if (!rawLensName) return null;
+
+  const extenderModel = readTiffAscii(view, equipment.get(0x0303));
+  const extenderByText = extenderFromText(extenderModel);
+  const extenderByCode = OLYMPUS_EXTENDERS[olympusExtenderKey(readTiffBytes(view, equipment.get(0x0301)))] || { name: "", factor: 1 };
+  const extender = extenderByText.factor > 1 || extenderByText.name ? extenderByText : extenderByCode;
+  const lensName = extender.name && extender.factor > 1 ? `${rawLensName} + ${extender.name}` : rawLensName;
+  const lensMin = roundFocal(readTiffShort(view, equipment.get(0x0207), little));
+  const lensMax = roundFocal(readTiffShort(view, equipment.get(0x0208), little));
+
+  return {
+    lensName,
+    lensMin,
+    lensMax,
+    teleconverterFactor: extender.factor || 1,
+    teleconverterApplied: (extender.factor || 1) > 1
+  };
 }
 
 function focal35From(tags = {}) {
@@ -259,9 +451,16 @@ async function parsePhoto(entry) {
       pick: EXIF_PICK
     });
 
-    const lensName = lensNameFrom(tags);
-    const lensRange = focalRangeFromTags(tags, lensName);
-    const teleconverterFactor = teleconverterFactorFromText(lensName);
+    const olympusRaw = await parseOlympusRawMetadata(file).catch(() => null);
+    const exifLensName = lensNameFrom(tags);
+    const lensName = olympusRaw?.lensName && (!exifLensName || exifLensName === UNKNOWN_LENS || /^Lens ID/i.test(exifLensName))
+      ? olympusRaw.lensName
+      : exifLensName;
+    const olympusRange = olympusRaw?.lensMin && olympusRaw?.lensMax
+      ? { start: olympusRaw.lensMin, end: olympusRaw.lensMax }
+      : null;
+    const lensRange = olympusRange || focalRangeFromTags(tags, lensName);
+    const teleconverterFactor = Math.max(teleconverterFactorFromText(lensName), Number(olympusRaw?.teleconverterFactor) || 1);
     const adjustedRange = applyTeleconverterRange(lensRange, teleconverterFactor);
     const directFocal = roundFocal(numericValue(tags?.FocalLength));
     const fallbackPrimeFocal = lensRange && Math.abs(lensRange.start - lensRange.end) < 0.05 ? roundFocal(lensRange.start) : null;

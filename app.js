@@ -44,6 +44,17 @@ const defaultVisualSettings = {
   rangeFallbackColor: "#111111",
   chartTextColor: "#111111"
 };
+const defaultChartSettings = {
+  chartTitle: "My Lens Roadmap",
+  displayMode: "actual",
+  labelMode: "both",
+  scaleMode: "log",
+  autoCropAxis: true,
+  axisMin: 7,
+  axisMax: 1200,
+  showTeleconverters: true,
+  showZoomGuides: true
+};
 let visualSettings = loadVisualSettings();
 const rawExtensions = new Set(["orf", "raw", "rw2", "arw", "cr2", "cr3", "nef", "dng"]);
 const exifAnalysis = {
@@ -150,6 +161,51 @@ function normalizeState(data) {
 function saveState() { localStorage.setItem("lensRoadmapStudioV3", JSON.stringify(state)); }
 function mountById(id) { return state.mounts.find(m => m.id === id); }
 function styleById(id) { return state.styles.find(s => s.id === id) || state.styles[0] || { name: "Default", color: "#667085", dash: "solid", width: 5, weight: 650 }; }
+
+function loadChartSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("lensRoadmapChartSettingsV1"));
+    return {
+      chartTitle: String(saved?.chartTitle || defaultChartSettings.chartTitle),
+      displayMode: ["actual", "equiv"].includes(saved?.displayMode) ? saved.displayMode : defaultChartSettings.displayMode,
+      labelMode: ["both", "actual", "equiv"].includes(saved?.labelMode) ? saved.labelMode : defaultChartSettings.labelMode,
+      scaleMode: ["log", "linear"].includes(saved?.scaleMode) ? saved.scaleMode : defaultChartSettings.scaleMode,
+      autoCropAxis: saved?.autoCropAxis ?? defaultChartSettings.autoCropAxis,
+      axisMin: Math.max(0.1, Number(saved?.axisMin) || defaultChartSettings.axisMin),
+      axisMax: Math.max(1, Number(saved?.axisMax) || defaultChartSettings.axisMax),
+      showTeleconverters: saved?.showTeleconverters ?? defaultChartSettings.showTeleconverters,
+      showZoomGuides: saved?.showZoomGuides ?? defaultChartSettings.showZoomGuides
+    };
+  } catch {}
+  return { ...defaultChartSettings };
+}
+
+function readChartSettingsFromDom() {
+  return {
+    chartTitle: $("chartTitle")?.value || defaultChartSettings.chartTitle,
+    displayMode: $("displayMode")?.value || defaultChartSettings.displayMode,
+    labelMode: $("labelMode")?.value || defaultChartSettings.labelMode,
+    scaleMode: $("scaleMode")?.value || defaultChartSettings.scaleMode,
+    autoCropAxis: !!$("autoCropAxis")?.checked,
+    axisMin: Math.max(0.1, Number($("axisMin")?.value) || defaultChartSettings.axisMin),
+    axisMax: Math.max(1, Number($("axisMax")?.value) || defaultChartSettings.axisMax),
+    showTeleconverters: !!$("showTeleconverters")?.checked,
+    showZoomGuides: !!$("showZoomGuides")?.checked
+  };
+}
+
+function saveChartSettings() {
+  localStorage.setItem("lensRoadmapChartSettingsV1", JSON.stringify(readChartSettingsFromDom()));
+}
+
+function applyChartSettingsToDom(settings = loadChartSettings()) {
+  Object.entries(settings).forEach(([key, value]) => {
+    const node = $(key);
+    if (!node) return;
+    if (node.type === "checkbox") node.checked = !!value;
+    else node.value = value;
+  });
+}
 
 function emptyExifResult() {
   return { lenses: [], focalColumns: [], maxCellCount: 0 };
@@ -1529,14 +1585,14 @@ function clearExifCache() {
   }
   if (!confirm("이 브라우저에 저장된 EXIF 분석 캐시를 삭제할까요? 사진 파일은 건드리지 않습니다.")) return;
 
-  const dbNames = ["lensRoadmapExifCacheV4", "lensRoadmapExifCacheV3", "lensRoadmapExifCacheV2", "lensRoadmapExifCacheV1"];
+  const dbNames = ["lensRoadmapExifCacheV5", "lensRoadmapExifCacheV4", "lensRoadmapExifCacheV3", "lensRoadmapExifCacheV2", "lensRoadmapExifCacheV1"];
   let done = 0;
   let failed = false;
   const finish = () => {
     exifAnalysis.summary.cacheHits = 0;
     exifAnalysis.result = emptyExifResult();
     saveStoredExifResult(exifAnalysis.result);
-    exifAnalysis.status = "EXIF 캐시를 초기화했습니다. 다음 분석에서는 JPEG를 다시 읽습니다.";
+    exifAnalysis.status = "EXIF 캐시를 초기화했습니다. 다음 분석에서는 JPEG/RAW를 다시 읽습니다.";
     renderAll();
     toast("EXIF 캐시를 초기화했습니다.");
   };
@@ -1869,6 +1925,8 @@ function chartSvgBlobUrl() {
 }
 
 function exportImage(format) {
+  saveChartSettings();
+  saveVisualSettings();
   renderChart();
   const mime = format === "webp" ? "image/webp" : format === "jpg" ? "image/jpeg" : "image/png";
   const extension = format === "webp" ? "webp" : format === "jpg" ? "jpg" : "png";
@@ -1942,17 +2000,7 @@ function downloadBlob(content, filename, type) {
 function exportJson() {
   const data = {
     version: 4,
-    settings: {
-      chartTitle: $("chartTitle").value,
-      displayMode: $("displayMode").value,
-      labelMode: $("labelMode").value,
-      scaleMode: $("scaleMode").value,
-      autoCropAxis: $("autoCropAxis").checked,
-      axisMin: Number($("axisMin").value),
-      axisMax: Number($("axisMax").value),
-      showTeleconverters: $("showTeleconverters").checked,
-      showZoomGuides: $("showZoomGuides").checked
-    },
+    settings: readChartSettingsFromDom(),
     visualSettings: currentVisualSettings(),
     ...state
   };
@@ -1981,15 +2029,12 @@ function importJson(file) {
         }))
       });
       if (data.settings) {
-        $("chartTitle").value = data.settings.chartTitle || $("chartTitle").value;
-        $("displayMode").value = data.settings.displayMode || "equiv";
-        $("labelMode").value = data.settings.labelMode || "equiv";
-        $("scaleMode").value = data.settings.scaleMode || "log";
-        $("autoCropAxis").checked = data.settings.autoCropAxis ?? true;
-        $("axisMin").value = data.settings.axisMin || 14;
-        $("axisMax").value = data.settings.axisMax || 1600;
-        $("showTeleconverters").checked = data.settings.showTeleconverters ?? true;
-        $("showZoomGuides").checked = data.settings.showZoomGuides ?? true;
+        applyChartSettingsToDom({
+          ...defaultChartSettings,
+          ...loadChartSettings(),
+          ...data.settings
+        });
+        saveChartSettings();
       }
       if (data.visualSettings) {
         visualSettings = Object.fromEntries(Object.entries(defaultVisualSettings).map(([key, fallback]) => [key, normalizeHexColor(data.visualSettings[key], fallback)]));
@@ -2280,10 +2325,12 @@ function bind() {
 
   ["displayMode", "labelMode", "scaleMode", "chartTitle", "autoCropAxis", "axisMin", "axisMax", "showTeleconverters", "showZoomGuides"].forEach(id => {
     $(id).addEventListener("input", () => {
+      saveChartSettings();
       renderChart();
       updateLensPreview();
     });
     $(id).addEventListener("change", () => {
+      saveChartSettings();
       renderChart();
       updateLensPreview();
     });
@@ -2307,5 +2354,6 @@ function bind() {
 }
 
 bind();
+applyChartSettingsToDom();
 applyVisualSettingsToDom();
 renderAll();
