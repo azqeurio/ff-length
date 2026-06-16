@@ -162,7 +162,9 @@ function addToGroup(groups, record) {
       focalMin: null,
       focalMax: null,
       equivMin: null,
-      equivMax: null
+      equivMax: null,
+      cropSum: 0,
+      cropCount: 0
     });
   }
 
@@ -183,6 +185,13 @@ function addToGroup(groups, record) {
     group.equivCounts.set(key, (group.equivCounts.get(key) || 0) + 1);
     group.equivMin = group.equivMin === null ? record.focalLength35mm : Math.min(group.equivMin, record.focalLength35mm);
     group.equivMax = group.equivMax === null ? record.focalLength35mm : Math.max(group.equivMax, record.focalLength35mm);
+    if (record.focalLength) {
+      const crop = record.focalLength35mm / record.focalLength;
+      if (Number.isFinite(crop) && crop >= 0.5 && crop <= 10) {
+        group.cropSum += crop;
+        group.cropCount += 1;
+      }
+    }
   }
 }
 
@@ -215,6 +224,7 @@ function serializeGroups(groups) {
         focalMax: group.focalMax,
         equivMin: group.equivMin,
         equivMax: group.equivMax,
+        cropEstimate: group.cropCount ? Math.round((group.cropSum / group.cropCount) * 10) / 10 : null,
         focalCounts,
         equivCounts,
         topFocals: topFocals(group.focalCounts)

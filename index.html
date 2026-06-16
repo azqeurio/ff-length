@@ -18,6 +18,7 @@
       </div>
       <div class="top-actions" aria-label="이미지 저장 도구">
         <button id="savePngBtn" class="btn btn-primary">PNG 저장</button>
+        <button id="saveJpgBtn" class="btn">JPG 저장</button>
         <button id="saveWebpBtn" class="btn">WebP 저장</button>
       </div>
     </header>
@@ -108,6 +109,10 @@
             <label class="btn btn-primary file-btn full">사진 폴더 선택
               <input id="photoFolderInput" type="file" accept=".jpg,.jpeg,.orf,.raw,.rw2,.arw,.cr2,.cr3,.nef,.dng,image/jpeg" webkitdirectory directory multiple hidden />
             </label>
+            <label class="btn btn-soft file-btn full">모바일 사진 선택
+              <input id="photoFilesInput" type="file" accept=".jpg,.jpeg,.orf,.raw,.rw2,.arw,.cr2,.cr3,.nef,.dng,image/jpeg" multiple hidden />
+            </label>
+            <button id="applyExifRoadmapBtn" class="btn" type="button">로드맵에 적용</button>
             <button id="cancelExifScanBtn" class="btn btn-danger" type="button" disabled>분석 취소</button>
             <button id="clearExifCacheBtn" class="btn" type="button">EXIF 캐시 초기화</button>
           </div>
@@ -267,7 +272,7 @@
               <h2 id="liveTitle">My Lens Roadmap</h2>
               <p id="liveDesc">35mm 환산 기준 · 로그 스케일</p>
             </div>
-            <div class="legend-note">완성된 도표는 PNG 또는 WebP로 저장할 수 있습니다.</div>
+            <div class="legend-note">완성된 도표는 PNG, JPG 또는 WebP로 저장할 수 있습니다.</div>
           </div>
           <div id="emptyState" class="empty-state" hidden>
             <strong>아직 표시할 렌즈가 없습니다.</strong>

@@ -272,8 +272,8 @@ function lensAxisValues() {
     const end = displayValue(lens, Number(lens.end));
     if (!Number.isFinite(start) || !Number.isFinite(end)) return;
     values.push(axisPresetValue(start), axisPresetValue(end));
-    if ($("showTeleconverters")?.checked && lens.tc14) values.push(axisPresetValue(end * 1.4));
-    if ($("showTeleconverters")?.checked && lens.tc20) values.push(axisPresetValue(end * 2));
+    if ($("showTeleconverters")?.checked && lens.tc14) values.push(axisPresetValue(displayValue(lens, Number(lens.end) * 1.4)));
+    if ($("showTeleconverters")?.checked && lens.tc20) values.push(axisPresetValue(displayValue(lens, Number(lens.end) * 2)));
   });
   return values.filter(value => Number.isFinite(value) && value > 0);
 }
@@ -438,6 +438,14 @@ function heatColor(count, max) {
   return `hsl(${hue}, 86%, ${light}%)`;
 }
 
+function activeTeleconverters() {
+  const enabled = $("showTeleconverters")?.checked;
+  return {
+    tc14: !!enabled && state.lenses.some(lens => lens.tc14),
+    tc20: !!enabled && state.lenses.some(lens => lens.tc20)
+  };
+}
+
 function focalEntriesForLens(lens, stats) {
   const start = Number(lens.start);
   const end = Number(lens.end);
@@ -445,6 +453,106 @@ function focalEntriesForLens(lens, stats) {
     .map(([focal, count]) => ({ focal: Number(focal), count: Number(count) || 0 }))
     .filter(item => Number.isFinite(item.focal) && item.count > 0 && item.focal >= start - .5 && item.focal <= end + .5)
     .sort((a, b) => a.focal - b.focal);
+}
+
+function ensureExifRoadmapStyle() {
+  const existing = state.styles.find(style => style.id === "exif-imported" || style.name.toLowerCase() === "exif imported");
+  if (existing) return existing;
+  const style = { id: "exif-imported", name: "EXIF Imported", color: "#2563EB", dash: "solid", width: 6, weight: 850 };
+  state.styles.push(style);
+  return style;
+}
+
+function ensureExifRoadmapMount(crop) {
+  const cleanCrop = Math.max(0.1, Math.round((Number(crop) || 1) * 10) / 10);
+  const close = state.mounts.find(mount => Math.abs(Number(mount.crop) - cleanCrop) < 0.06);
+  if (close) return close;
+  const mount = {
+    id: `exif-crop-${String(cleanCrop).replace(".", "-")}`,
+    name: `EXIF crop x${clean(cleanCrop)}`,
+    crop: cleanCrop,
+    color: "#0F766E"
+  };
+  state.mounts.push(mount);
+  return mount;
+}
+
+function findRoadmapLensForExif(stats) {
+  const key = normalizeLensLookupName(stats.lensName);
+  if (!key) return null;
+  return state.lenses.find(lens => {
+    const lensKey = normalizeLensLookupName(lens.name);
+    if (!lensKey) return false;
+    return lensKey === key || lensKey.includes(key) || key.includes(lensKey);
+  }) || null;
+}
+
+function applyExifStatsToRoadmap(options = {}) {
+  const { silent = false, render = true } = options;
+  const lenses = exifAnalysis.result?.lenses || [];
+  if (!lenses.length) {
+    if (!silent) toast("적용할 EXIF 분석 결과가 없습니다.");
+    return { added: 0, updated: 0, skipped: 0 };
+  }
+
+  let style = null;
+  let added = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  lenses.forEach(stats => {
+    const parsedRange = parseFocalRange(stats.lensName);
+    const rawStart = parsedRange?.start ?? stats.focalMin;
+    const rawEnd = parsedRange?.end ?? stats.focalMax;
+    if (!rawStart || !rawEnd || /^unknown lens$/i.test(stats.lensName || "")) {
+      skipped += 1;
+      return;
+    }
+
+    const mount = ensureExifRoadmapMount(stats.cropEstimate || singleChartCrop() || 1);
+    const start = Math.min(Number(rawStart), Number(rawEnd));
+    const end = Math.max(Number(rawStart), Number(rawEnd));
+    const type = parsedRange?.type || (Math.abs(start - end) < 0.05 ? "prime" : "zoom");
+    const existing = findRoadmapLensForExif(stats);
+
+    if (existing) {
+      existing.name = stats.lensName || existing.name;
+      existing.mountId = mount.id;
+      if (!existing.styleId) {
+        style = style || ensureExifRoadmapStyle();
+        existing.styleId = style.id;
+      }
+      existing.start = start;
+      existing.end = end;
+      existing.type = type;
+      updated += 1;
+      return;
+    }
+
+    style = style || ensureExifRoadmapStyle();
+    state.lenses.push({
+      id: uid(),
+      mountId: mount.id,
+      type,
+      styleId: style.id,
+      name: stats.lensName,
+      start,
+      end,
+      tc14: false,
+      tc20: false
+    });
+    added += 1;
+  });
+
+  if (added || updated) {
+    saveState();
+    if (render) renderAll();
+  }
+
+  if (!silent) {
+    toast(`EXIF 렌즈 ${added}개 추가, ${updated}개 업데이트, ${skipped}개 건너뜀`);
+  }
+  return { added, updated, skipped };
 }
 
 function chartRows() {
@@ -499,12 +607,13 @@ function renderChart() {
     else contentH += Math.max(138, row.items.length * primeRowH + 44);
   });
 
-  const height = Math.max(560, plotTop + contentH + footerH);
+  const height = plotTop + contentH + footerH + 8;
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
   svg.setAttribute("width", width);
   svg.setAttribute("height", height);
 
   makeEl(svg, "rect", { x: 0, y: 0, width, height, fill: "#FFFFFF" });
+  const defs = makeEl(svg, "defs", {});
 
   const title = $("chartTitle").value.trim() || "Lens Roadmap";
   const modeText = axisModeText();
@@ -624,7 +733,7 @@ function renderChart() {
       }
 
       makeEl(svg, "rect", { x: startX - 6, y: cy - 5, width: 8, height: 10, fill: color });
-      const heatDrawn = exifStats ? drawZoomHeatmapLine(svg, item, exifStats, leftChart, chartW, x) : false;
+      const heatDrawn = exifStats ? drawZoomHeatmapLine(svg, defs, item, exifStats, leftChart, chartW, x) : false;
       if (!heatDrawn) {
         makeEl(svg, "line", { x1: startX, y1: cy, x2: endX, y2: cy, stroke: color, "stroke-width": Number(style.width) + 1, "stroke-linecap": "butt", "stroke-dasharray": dashArray(style) });
       }
@@ -647,12 +756,19 @@ function renderChart() {
 
   let lx = width - 320;
   const legendY = height - 14;
-  if ($("showTeleconverters").checked) {
+  const teleconverters = activeTeleconverters();
+  if (teleconverters.tc14 || teleconverters.tc20) {
     const tcLegendX = plotLeft + 132;
-    makeEl(svg, "line", { x1: tcLegendX, y1: legendY - 4, x2: tcLegendX + 28, y2: legendY - 4, stroke: "#B9A37C", "stroke-width": 4, "stroke-linecap": "butt" });
-    makeText(svg, { x: tcLegendX + 35, y: legendY, "font-size": 11, "font-weight": 850, fill: "#111111" }, "1.4x TC");
-    makeEl(svg, "line", { x1: tcLegendX + 100, y1: legendY - 4, x2: tcLegendX + 128, y2: legendY - 4, stroke: "#6F7C85", "stroke-width": 4, "stroke-linecap": "butt" });
-    makeText(svg, { x: tcLegendX + 135, y: legendY, "font-size": 11, "font-weight": 850, fill: "#111111" }, "2x TC");
+    let tcX = tcLegendX;
+    if (teleconverters.tc14) {
+      makeEl(svg, "line", { x1: tcX, y1: legendY - 4, x2: tcX + 28, y2: legendY - 4, stroke: "#B9A37C", "stroke-width": 4, "stroke-linecap": "butt" });
+      makeText(svg, { x: tcX + 35, y: legendY, "font-size": 11, "font-weight": 850, fill: "#111111" }, "1.4x TC");
+      tcX += 100;
+    }
+    if (teleconverters.tc20) {
+      makeEl(svg, "line", { x1: tcX, y1: legendY - 4, x2: tcX + 28, y2: legendY - 4, stroke: "#6F7C85", "stroke-width": 4, "stroke-linecap": "butt" });
+      makeText(svg, { x: tcX + 35, y: legendY, "font-size": 11, "font-weight": 850, fill: "#111111" }, "2x TC");
+    }
   }
   if (roadmapExifEnabled()) {
     const heatX = plotLeft + 300;
@@ -675,33 +791,69 @@ function drawTc(svg, leftChart, chartW, x, startX, y, tcEnd, max, color, dash, l
   if (label) makeText(svg, { x: tcX + 8, y: y + 4, "font-size": 10, "font-weight": 800, fill: "#64748B" }, label);
 }
 
-function drawZoomHeatmapLine(svg, item, stats, leftChart, chartW, x) {
+function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x) {
   const entries = focalEntriesForLens(item.lens, stats);
   if (!entries.length) return false;
 
   const lensStart = Number(item.lens.start);
   const lensEnd = Number(item.lens.end);
+  const lineStart = Math.min(item.startX, item.endX);
+  const lineEnd = Math.max(item.startX, item.endX);
+  const lineW = lineEnd - lineStart;
+  if (lineW <= 1) return false;
+
   const maxCount = Math.max(1, ...entries.map(entry => entry.count));
   const width = Math.max(6, Number(item.style.width) + 3);
+  const gradientId = `heat-${String(item.lens.id || uid()).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+  const gradient = makeEl(defs, "linearGradient", {
+    id: gradientId,
+    gradientUnits: "userSpaceOnUse",
+    x1: lineStart,
+    y1: item.cy,
+    x2: lineEnd,
+    y2: item.cy
+  });
 
-  entries.forEach((entry, index) => {
-    const prev = entries[index - 1]?.focal;
-    const next = entries[index + 1]?.focal;
-    const segStart = prev === undefined ? lensStart : (prev + entry.focal) / 2;
-    const segEnd = next === undefined ? lensEnd : (entry.focal + next) / 2;
-    const displayStart = displayValue(item.lens, Math.max(lensStart, segStart));
-    const displayEnd = displayValue(item.lens, Math.min(lensEnd, segEnd));
-    const x1 = clamp(leftChart + x(displayStart), leftChart, leftChart + chartW);
-    const x2 = clamp(leftChart + x(displayEnd), leftChart, leftChart + chartW);
-    makeEl(svg, "line", {
-      x1,
-      y1: item.cy,
-      x2: Math.max(x1 + 1, x2),
-      y2: item.cy,
-      stroke: heatColor(entry.count, maxCount),
-      "stroke-width": width,
-      "stroke-linecap": "butt"
+  const stops = entries
+    .map(entry => {
+      const px = clamp(leftChart + x(displayValue(item.lens, entry.focal)), lineStart, lineEnd);
+      return {
+        offset: clamp(((px - lineStart) / lineW) * 100, 0, 100),
+        color: heatColor(entry.count, maxCount)
+      };
+    })
+    .sort((a, b) => a.offset - b.offset);
+
+  if (!stops.length) return false;
+  if (stops[0].offset > 0) stops.unshift({ offset: 0, color: stops[0].color });
+  if (stops[stops.length - 1].offset < 100) stops.push({ offset: 100, color: stops[stops.length - 1].color });
+
+  stops.forEach(stop => {
+    makeEl(gradient, "stop", {
+      offset: `${clean(stop.offset)}%`,
+      "stop-color": stop.color,
+      "stop-opacity": .98
     });
+  });
+
+  makeEl(svg, "line", {
+    x1: lineStart,
+    y1: item.cy,
+    x2: lineEnd,
+    y2: item.cy,
+    stroke: "#D8E5F6",
+    "stroke-width": width + 1,
+    "stroke-linecap": "butt",
+    opacity: .72
+  });
+  makeEl(svg, "line", {
+    x1: lineStart,
+    y1: item.cy,
+    x2: lineEnd,
+    y2: item.cy,
+    stroke: `url(#${gradientId})`,
+    "stroke-width": width,
+    "stroke-linecap": "butt"
   });
 
   return true;
@@ -972,6 +1124,8 @@ function renderExifAnalysis() {
   if (status) status.textContent = exifAnalysis.status;
   const cancelBtn = $("cancelExifScanBtn");
   if (cancelBtn) cancelBtn.disabled = !exifAnalysis.running;
+  const applyBtn = $("applyExifRoadmapBtn");
+  if (applyBtn) applyBtn.disabled = exifAnalysis.running || !(result.lenses || []).length;
 
   const total = summary.total || Math.max(0, scan.jpegs + scan.raws - scan.rawIgnored);
   const statMap = {
@@ -1086,10 +1240,10 @@ function startExifWorker(files) {
       exifAnalysis.result = message.result || { lenses: [], focalColumns: [], maxCellCount: 0 };
       exifAnalysis.running = false;
       exifAnalysis.worker = null;
-      exifAnalysis.status = `분석 완료: ${formatCount(message.summary.processed)}개 사진, 렌즈 감지 ${formatCount(message.summary.withLens)}개, 초점거리 감지 ${formatCount(message.summary.withFocal)}개.`;
+      const applied = applyExifStatsToRoadmap({ silent: true, render: false });
+      exifAnalysis.status = `분석 완료: ${formatCount(message.summary.processed)}개 사진, 렌즈 감지 ${formatCount(message.summary.withLens)}개, 초점거리 감지 ${formatCount(message.summary.withFocal)}개. 로드맵 ${formatCount(applied.added)}개 추가, ${formatCount(applied.updated)}개 업데이트.`;
       worker.terminate();
-      renderExifAnalysis();
-      renderChart();
+      renderAll();
       switchTab("Exif");
       return;
     }
@@ -1451,8 +1605,8 @@ function chartSvgBlobUrl() {
 }
 
 function exportImage(format) {
-  const mime = format === "webp" ? "image/webp" : "image/png";
-  const extension = format === "webp" ? "webp" : "png";
+  const mime = format === "webp" ? "image/webp" : format === "jpg" ? "image/jpeg" : "image/png";
+  const extension = format === "webp" ? "webp" : format === "jpg" ? "jpg" : "png";
   const url = chartSvgBlobUrl();
   const img = new Image();
   img.onload = () => {
@@ -1480,8 +1634,12 @@ function exportImage(format) {
         alert("현재 브라우저가 WebP 저장을 지원하지 않습니다. PNG 저장을 사용해 주세요.");
         return;
       }
+      if (format === "jpg" && blob.type !== mime) {
+        alert("현재 브라우저가 JPG 저장을 지원하지 않습니다. PNG 저장을 사용해 주세요.");
+        return;
+      }
       downloadBlob(blob, `lens-roadmap.${extension}`, mime);
-    }, mime, format === "webp" ? 0.92 : undefined);
+    }, mime, format === "webp" ? 0.92 : format === "jpg" ? 0.94 : undefined);
   };
   img.onerror = () => {
     URL.revokeObjectURL(url);
@@ -1492,6 +1650,10 @@ function exportImage(format) {
 
 function exportPng() {
   exportImage("png");
+}
+
+function exportJpg() {
+  exportImage("jpg");
 }
 
 function exportWebp() {
@@ -1523,7 +1685,8 @@ function exportJson() {
       axisMin: Number($("axisMin").value),
       axisMax: Number($("axisMax").value),
       showTeleconverters: $("showTeleconverters").checked,
-      showZoomGuides: $("showZoomGuides").checked
+      showZoomGuides: $("showZoomGuides").checked,
+      showRoadmapExifHeatmap: $("showRoadmapExifHeatmap").checked
     },
     ...state
   };
@@ -1561,6 +1724,7 @@ function importJson(file) {
         $("axisMax").value = data.settings.axisMax || 1600;
         $("showTeleconverters").checked = data.settings.showTeleconverters ?? true;
         $("showZoomGuides").checked = data.settings.showZoomGuides ?? true;
+        $("showRoadmapExifHeatmap").checked = data.settings.showRoadmapExifHeatmap ?? true;
       }
       saveState();
       renderAll();
@@ -1796,6 +1960,7 @@ function bind() {
   $("addLensBtn").addEventListener("click", addLens);
   $("autoFitAxisBtn").addEventListener("click", autoFitAxis);
   $("savePngBtn").addEventListener("click", exportPng);
+  $("saveJpgBtn").addEventListener("click", exportJpg);
   $("saveWebpBtn").addEventListener("click", exportWebp);
   $("exportJsonBtn").addEventListener("click", exportJson);
   $("importJsonInput").addEventListener("change", e => e.target.files[0] && importJson(e.target.files[0]));
@@ -1806,6 +1971,12 @@ function bind() {
     analyzePhotoFolder(files);
     e.target.value = "";
   });
+  $("photoFilesInput").addEventListener("change", e => {
+    const files = Array.from(e.target.files || []);
+    analyzePhotoFolder(files);
+    e.target.value = "";
+  });
+  $("applyExifRoadmapBtn").addEventListener("click", () => applyExifStatsToRoadmap());
   $("cancelExifScanBtn").addEventListener("click", () => cancelExifAnalysis());
   $("clearExifCacheBtn").addEventListener("click", clearExifCache);
 
