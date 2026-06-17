@@ -248,6 +248,13 @@ input[type="color"] {
   padding: 5px;
 }
 
+.language-select {
+  width: auto;
+  min-width: 112px;
+  min-height: 42px;
+  flex: 0 0 auto;
+}
+
 .table-color {
   width: 46px;
   min-width: 46px;

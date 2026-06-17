@@ -1,5 +1,311 @@
 const $ = (id) => document.getElementById(id);
 const uid = () => (globalThis.crypto?.randomUUID ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+const LANG_KEY = "lensRoadmapLanguageV1";
+let currentLanguage = localStorage.getItem(LANG_KEY) || "ko";
+
+const i18n = {
+  ko: {
+    appTitle: "마운트별 렌즈 화각 로드맵",
+    savePng: "PNG 저장",
+    saveJpg: "JPG 저장",
+    saveWebp: "WebP 저장",
+    exifTitle: "EXIF 렌즈 통계",
+    exifDesc: "로컬 사진 폴더의 JPEG와 가능한 RAW EXIF를 브라우저 안에서 분석해 렌즈별 초점거리 사용량을 보여줍니다.",
+    folderPick: "사진 폴더 선택",
+    mobilePick: "모바일 사진 선택",
+    applyExif: "로드맵에 적용",
+    cancelAnalysis: "분석 취소",
+    clearExifCache: "EXIF 캐시 초기화",
+    folderScan: "폴더 스캔",
+    exifAnalysis: "EXIF 분석",
+    idle: "대기",
+    privacy: "사진은 업로드되지 않습니다. EXIF와 분석 결과는 이 브라우저의 IndexedDB 캐시에만 저장됩니다.",
+    quickTitle: "렌즈 빠르게 추가",
+    quickDesc: "렌즈명에 있는 12-40mm, 35mm 같은 값을 자동으로 읽습니다.",
+    mount: "마운트",
+    style: "스타일",
+    lensName: "렌즈 이름",
+    lensPlaceholder: "예: M.Zuiko Digital ED 12-40mm F2.8 PRO II",
+    parseLens: "이름에서 mm 자동 입력",
+    primeNote: "단렌즈는 시작과 끝 mm가 같으면 됩니다.",
+    startMm: "시작 mm",
+    endMm: "끝 mm",
+    type: "유형",
+    teleconverterCompatible: "텔레컨버터 호환",
+    lensPreviewEmpty: "렌즈 정보를 입력하면 실제/환산 화각이 여기에 표시됩니다.",
+    addLens: "렌즈 추가",
+    excelTitle: "Excel로 가져오기",
+    excelDesc: "양식 파일을 내려받아 채운 뒤 업로드하면 렌즈가 자동으로 추가됩니다.",
+    excelDownload: "Excel 양식 다운로드",
+    excelUpload: "Excel 업로드",
+    excelNote: "렌즈명, 마운트, 크롭, 스타일, 초점거리 또는 시작/끝 mm 열을 인식합니다.",
+    exampleOpen: "업로드 예제 보기",
+    chartSettings: "차트 출력 설정",
+    chartDesc: "축은 배치 기준, 라벨은 표기 방식을 따로 선택합니다.",
+    chartTitleLabel: "차트 제목",
+    axisBasis: "차트 축 기준",
+    axisActual: "실제 초점거리 기준",
+    axisEquiv: "35mm 환산 기준",
+    topAxis: "상단 축 표기",
+    labelBoth: "초점거리 + 35mm 환산",
+    labelActual: "초점거리만",
+    labelEquiv: "35mm 환산만",
+    axisScale: "축 스케일",
+    logScale: "로드맵형 로그",
+    linearScale: "선형",
+    autoFitAxis: "축 자동 맞춤",
+    fitCurrent: "현재 렌즈에 맞추기",
+    usedRangeOnly: "사용한 화각대만 자동 표시",
+    usedRangeDesc: "입력한 렌즈가 있는 구간만 표준 눈금에 맞춰 자동으로 보여줍니다. 예: 24-70mm → 20-75mm.",
+    axisMin: "축 최소값",
+    axisMax: "축 최대값",
+    showTc: "텔레컨버터 확장 범위 표시",
+    showTcDesc: "1.4x와 2x 확장을 얇은 점선으로 표시합니다.",
+    showGuides: "줌 시작/끝 가이드 표시",
+    showGuidesDesc: "줌렌즈의 시작과 끝 위치를 위쪽 점선으로 올려 정확히 보여줍니다.",
+    heatLow: "히트맵 낮은 사용",
+    heatHigh: "히트맵 높은 사용",
+    chartBg: "전체 바탕색",
+    plotBg: "로드맵 바탕색",
+    lineColor: "축/테두리 색",
+    gridColor: "눈금 점선 색",
+    rangeColor: "기본 화각 범위 색",
+    textColor: "텍스트 색",
+    mountTitle: "마운트 만들기",
+    mountDesc: "프리셋을 누르면 바로 추가되고, 이미 있으면 선택만 됩니다.",
+    newMountName: "새 마운트 이름",
+    cropFactor: "크롭 팩터",
+    mountColor: "마운트 색상",
+    addMount: "마운트 추가",
+    styleTitle: "스타일 만들기",
+    styleDesc: "브랜드 라인업, 등급, 시대별 렌즈를 구분할 때 씁니다.",
+    newStyleName: "새 스타일 이름",
+    color: "색상",
+    lineShape: "선 모양",
+    solid: "실선",
+    dash: "긴 점선",
+    dot: "짧은 점선",
+    lineWidth: "선 두께",
+    textWeight: "텍스트 굵기",
+    normal: "보통",
+    bold: "굵게",
+    addStyle: "스타일 추가",
+    reloadSample: "샘플 다시 불러오기",
+    backupJson: "JSON 백업",
+    importJson: "JSON 불러오기",
+    clearAll: "전체 삭제",
+    livePreview: "Live Preview",
+    exportNote: "완성된 도표는 PNG, JPG 또는 WebP로 저장할 수 있습니다.",
+    emptyTitle: "아직 표시할 렌즈가 없습니다.",
+    emptyDesc: "마운트와 스타일을 만든 뒤 렌즈를 추가하면 로드맵이 여기에 나타납니다.",
+    tabMounts: "마운트",
+    tabStyles: "스타일",
+    tabLenses: "렌즈",
+    tabExif: "EXIF 분석",
+    targetFiles: "대상 파일",
+    processed: "분석 완료",
+    cacheUsed: "캐시 사용",
+    lensDetected: "렌즈 감지",
+    lensUsage: "렌즈별 초점거리 통계",
+    jpgPriority: "동일 파일은 JPG 우선",
+    photoCount: "사진 수",
+    focalRange: "초점거리 범위",
+    equivRange: "35mm 환산 범위",
+    topFocals: "많이 쓴 초점거리",
+    heatmapTitle: "렌즈별 초점거리 히트맵",
+    strongerMore: "진할수록 많이 사용",
+    noMountOption: "마운트를 먼저 추가하세요",
+    noStyleOption: "스타일을 먼저 추가하세요",
+    noMount: "마운트 없음",
+    noExifRows: "아직 분석된 사진이 없습니다. 먼저 사진 폴더를 선택하세요.",
+    noHeatTitle: "히트맵 데이터가 없습니다.",
+    noHeatDesc: "초점거리 EXIF가 있는 사진을 분석하면 여기에 표시됩니다.",
+    actualWord: "실제",
+    equivWord: "35mm 환산",
+    topAxisSuffix: "상단 축",
+    logScaleText: "로그 스케일",
+    linearScaleText: "선형 스케일",
+    heatLegend: "EXIF heatmap low → high",
+    currentData: "As of current data",
+    files: "files",
+    duplicateIgnored: "중복 RAW {raw}개 제외 · 기타 {other}개 제외 · 오류 {errors}개",
+    scanStatus: "폴더를 스캔하는 중입니다. 하위 폴더까지 포함해 JPEG와 RAW EXIF 후보를 골라냅니다.",
+    noPhotoFiles: "분석할 JPEG/RAW 파일을 찾지 못했습니다. 사진 파일이 있는 폴더를 선택하세요.",
+    foundPhotos: "{count}개 사진을 찾았습니다. JPG가 있는 동일 RAW는 제외했고, EXIF 캐시를 확인합니다.",
+    workerUnsupported: "이 브라우저는 Web Worker를 지원하지 않아 대용량 EXIF 분석을 실행할 수 없습니다.",
+    analyzingExif: "EXIF 분석 중입니다. 캐시 {cached}개, 신규 분석 {parsed}개.",
+    analysisDone: "분석 완료: {processed}개 사진, 렌즈 감지 {lens}개, 초점거리 감지 {focal}개. 기존 렌즈 {replaced}개를 지우고 EXIF 렌즈 {added}개로 로드맵을 만들었습니다.",
+    analysisCancelled: "분석이 취소되었습니다.",
+    cacheCleared: "EXIF 캐시를 초기화했습니다. 다음 분석에서는 JPEG/RAW를 다시 읽습니다.",
+    cacheClearedToast: "EXIF 캐시를 초기화했습니다.",
+    noIndexedDb: "이 브라우저는 IndexedDB를 지원하지 않아 EXIF 캐시를 사용할 수 없습니다.",
+    cacheBusy: "분석이 진행 중일 때는 캐시를 초기화할 수 없습니다. 먼저 분석을 취소해 주세요.",
+    clearCacheConfirm: "이 브라우저에 저장된 EXIF 분석 캐시를 삭제할까요? 사진 파일은 건드리지 않습니다.",
+    clearCacheFailed: "EXIF 캐시를 초기화하지 못했습니다. 브라우저 저장소 권한을 확인해 주세요.",
+    clearCacheBlocked: "캐시 초기화가 대기 중입니다. 다른 탭에서 이 앱을 닫은 뒤 다시 시도해 주세요.",
+    countUnit: "개",
+    noMountRows: "마운트가 없습니다. 프리셋을 누르거나 새 마운트를 추가하세요.",
+    noStyleRows: "스타일이 없습니다. 기본 스타일이나 새 스타일을 추가하세요.",
+    noLensRows: "아직 렌즈가 없습니다. 왼쪽의 렌즈 빠르게 추가 패널을 사용하세요.",
+    addMountFirst: "먼저 마운트를 추가해 주세요. 프리셋을 누르면 바로 시작할 수 있습니다.",
+    addStyleFirst: "먼저 스타일을 추가해 주세요.",
+    selectedMount: "선택된 마운트",
+    previewRange: "{mount} · 실제 {actual} · 35mm 환산 {equiv} · 환산값은 상단 축에서 표시됩니다."
+  },
+  en: {
+    appTitle: "Lens Focal Length Roadmap by Mount",
+    savePng: "Save PNG",
+    saveJpg: "Save JPG",
+    saveWebp: "Save WebP",
+    exifTitle: "EXIF Lens Stats",
+    exifDesc: "Analyze JPEG and supported RAW EXIF from a local photo folder in your browser and see focal length usage by lens.",
+    folderPick: "Select Photo Folder",
+    mobilePick: "Select Photos",
+    applyExif: "Apply to Roadmap",
+    cancelAnalysis: "Cancel Analysis",
+    clearExifCache: "Clear EXIF Cache",
+    folderScan: "Folder Scan",
+    exifAnalysis: "EXIF Analysis",
+    idle: "Idle",
+    privacy: "Photos are never uploaded. EXIF data and analysis results stay in this browser's IndexedDB cache.",
+    quickTitle: "Quick Add Lens",
+    quickDesc: "Automatically reads values like 12-40mm or 35mm from the lens name.",
+    mount: "Mount",
+    style: "Style",
+    lensName: "Lens Name",
+    lensPlaceholder: "e.g. M.Zuiko Digital ED 12-40mm F2.8 PRO II",
+    parseLens: "Auto-fill mm from Name",
+    primeNote: "For a prime lens, use the same start and end mm.",
+    startMm: "Start mm",
+    endMm: "End mm",
+    type: "Type",
+    teleconverterCompatible: "Teleconverter Support",
+    lensPreviewEmpty: "Enter lens info to preview actual and 35mm equivalent focal lengths.",
+    addLens: "Add Lens",
+    excelTitle: "Import from Excel",
+    excelDesc: "Download the template, fill it in, then upload it to add lenses automatically.",
+    excelDownload: "Download Excel Template",
+    excelUpload: "Upload Excel",
+    excelNote: "Recognizes lens name, mount, crop, style, focal length, or start/end mm columns.",
+    exampleOpen: "Show Upload Example",
+    chartSettings: "Chart Output Settings",
+    chartDesc: "Choose the chart axis basis and top-axis label style separately.",
+    chartTitleLabel: "Chart Title",
+    axisBasis: "Chart Axis Basis",
+    axisActual: "Actual Focal Length",
+    axisEquiv: "35mm Equivalent",
+    topAxis: "Top Axis Labels",
+    labelBoth: "Focal Length + 35mm Equivalent",
+    labelActual: "Focal Length Only",
+    labelEquiv: "35mm Equivalent Only",
+    axisScale: "Axis Scale",
+    logScale: "Roadmap Log",
+    linearScale: "Linear",
+    autoFitAxis: "Auto-fit Axis",
+    fitCurrent: "Fit Current Lenses",
+    usedRangeOnly: "Show Used Focal Range Only",
+    usedRangeDesc: "Automatically crops to the lens range using standard tick marks. Example: 24-70mm → 20-75mm.",
+    axisMin: "Axis Minimum",
+    axisMax: "Axis Maximum",
+    showTc: "Show Teleconverter Extension Range",
+    showTcDesc: "Shows 1.4x and 2x extensions as thin guide lines.",
+    showGuides: "Show Zoom Start/End Guides",
+    showGuidesDesc: "Raises zoom start/end positions as dotted guides for easier reading.",
+    heatLow: "Heatmap Low Usage",
+    heatHigh: "Heatmap High Usage",
+    chartBg: "Chart Background",
+    plotBg: "Roadmap Background",
+    lineColor: "Axis/Border Color",
+    gridColor: "Grid Line Color",
+    rangeColor: "Default Range Color",
+    textColor: "Text Color",
+    mountTitle: "Create Mount",
+    mountDesc: "Use presets to add common mounts quickly; existing mounts are selected automatically.",
+    newMountName: "New Mount Name",
+    cropFactor: "Crop Factor",
+    mountColor: "Mount Color",
+    addMount: "Add Mount",
+    styleTitle: "Create Style",
+    styleDesc: "Use styles to separate lens grades, brands, or eras.",
+    newStyleName: "New Style Name",
+    color: "Color",
+    lineShape: "Line Shape",
+    solid: "Solid",
+    dash: "Long Dash",
+    dot: "Short Dash",
+    lineWidth: "Line Width",
+    textWeight: "Text Weight",
+    normal: "Regular",
+    bold: "Bold",
+    addStyle: "Add Style",
+    reloadSample: "Reload Sample",
+    backupJson: "JSON Backup",
+    importJson: "Import JSON",
+    clearAll: "Clear All",
+    livePreview: "Live Preview",
+    exportNote: "The finished chart can be saved as PNG, JPG, or WebP.",
+    emptyTitle: "No lenses to show yet.",
+    emptyDesc: "Create a mount and style, then add lenses to see the roadmap here.",
+    tabMounts: "Mounts",
+    tabStyles: "Styles",
+    tabLenses: "Lenses",
+    tabExif: "EXIF Analysis",
+    targetFiles: "Target Files",
+    processed: "Processed",
+    cacheUsed: "Cache Used",
+    lensDetected: "Lenses Detected",
+    lensUsage: "Focal Length Stats by Lens",
+    jpgPriority: "JPG is preferred for duplicate files",
+    photoCount: "Photos",
+    focalRange: "Focal Range",
+    equivRange: "35mm Equivalent Range",
+    topFocals: "Most Used Focal Lengths",
+    heatmapTitle: "Focal Length Heatmap by Lens",
+    strongerMore: "Darker means more usage",
+    noMountOption: "Add a mount first",
+    noStyleOption: "Add a style first",
+    noMount: "No mounts",
+    noExifRows: "No photos analyzed yet. Select a photo folder first.",
+    noHeatTitle: "No heatmap data yet.",
+    noHeatDesc: "Analyze photos with focal length EXIF to show the heatmap here.",
+    actualWord: "Actual",
+    equivWord: "35mm equivalent",
+    topAxisSuffix: "top axis",
+    logScaleText: "log scale",
+    linearScaleText: "linear scale",
+    heatLegend: "EXIF heatmap low → high",
+    currentData: "As of current data",
+    files: "files",
+    duplicateIgnored: "Duplicate RAW skipped: {raw} · Other skipped: {other} · Errors: {errors}",
+    scanStatus: "Scanning the folder, including subfolders, for JPEG and RAW EXIF candidates.",
+    noPhotoFiles: "No JPEG/RAW files were found. Select a folder that contains photo files.",
+    foundPhotos: "Found {count} photos. Duplicate RAW files with matching JPGs were skipped; checking EXIF cache.",
+    workerUnsupported: "This browser does not support Web Workers, so large EXIF analysis cannot run.",
+    analyzingExif: "Analyzing EXIF. Cache hits: {cached}, newly parsed: {parsed}.",
+    analysisDone: "Analysis complete: {processed} photos, {lens} with lens data, {focal} with focal length. Replaced {replaced} existing lenses with {added} EXIF lenses.",
+    analysisCancelled: "Analysis cancelled.",
+    cacheCleared: "EXIF cache was cleared. JPEG/RAW files will be re-read on the next analysis.",
+    cacheClearedToast: "EXIF cache cleared.",
+    noIndexedDb: "This browser does not support IndexedDB, so EXIF cache cannot be used.",
+    cacheBusy: "Cache cannot be cleared while analysis is running. Cancel the analysis first.",
+    clearCacheConfirm: "Delete the EXIF analysis cache stored in this browser? Photo files will not be touched.",
+    clearCacheFailed: "Could not clear the EXIF cache. Check browser storage permissions.",
+    clearCacheBlocked: "Cache clearing is waiting. Close this app in other tabs, then try again.",
+    countUnit: "",
+    noMountRows: "No mounts yet. Use a preset or add a new mount.",
+    noStyleRows: "No styles yet. Add a default style or create a new one.",
+    noLensRows: "No lenses yet. Use the Quick Add Lens panel on the left.",
+    addMountFirst: "Add a mount first. You can start quickly with a preset.",
+    addStyleFirst: "Add a style first.",
+    selectedMount: "Selected mount",
+    previewRange: "{mount} · actual {actual} · 35mm equivalent {equiv} · equivalent values appear on the top axis."
+  }
+};
+
+function t(key, vars = {}) {
+  const text = i18n[currentLanguage]?.[key] ?? i18n.ko[key] ?? key;
+  return String(text).replace(/\{(\w+)\}/g, (_, name) => vars[name] ?? "");
+}
 
 const defaultData = {
   mounts: [
@@ -64,7 +370,7 @@ const exifAnalysis = {
   scan: { total: 0, scanned: 0, jpegs: 0, raws: 0, rawIgnored: 0, otherIgnored: 0 },
   summary: { total: 0, processed: 0, cacheHits: 0, parsed: 0, errors: 0, withLens: 0, withFocal: 0 },
   result: loadStoredExifResult(),
-  status: "사진은 업로드되지 않습니다. EXIF와 분석 결과는 이 브라우저의 IndexedDB 캐시에만 저장됩니다."
+  status: t("privacy")
 };
 
 function clone(obj) { return JSON.parse(JSON.stringify(obj)); }
@@ -384,14 +690,14 @@ function equivRange(lens) {
 }
 
 function axisModeText() {
-  return $("displayMode").value === "equiv" ? "35mm 환산 기준" : "실제 초점거리 기준";
+  return $("displayMode").value === "equiv" ? t("axisEquiv") : t("axisActual");
 }
 
 function labelModeText() {
   const mode = $("labelMode")?.value || "equiv";
-  if (mode === "actual") return "초점거리만";
-  if (mode === "both") return "초점거리 + 35mm 환산";
-  return "35mm 환산만";
+  if (mode === "actual") return t("labelActual");
+  if (mode === "both") return t("labelBoth");
+  return t("labelEquiv");
 }
 
 function labelRange(lens) {
@@ -974,10 +1280,10 @@ function renderChart() {
 
   const title = $("chartTitle").value.trim() || "Lens Roadmap";
   const modeText = axisModeText();
-  const scaleText = $("scaleMode").value === "log" ? "로그 스케일" : "선형 스케일";
+  const scaleText = $("scaleMode").value === "log" ? t("logScaleText") : t("linearScaleText");
 
   $("liveTitle").textContent = title;
-  $("liveDesc").textContent = `${modeText} · 상단 축 ${labelModeText()} · ${scaleText}`;
+  $("liveDesc").textContent = `${modeText} · ${t("topAxisSuffix")} ${labelModeText()} · ${scaleText}`;
 
   syncAxisControls();
   const axisRange = currentAxisRange();
@@ -1113,7 +1419,7 @@ function renderChart() {
   });
   drawDeferredOverlays();
 
-  makeText(svg, { x: plotLeft + 4, y: height - 16, "font-size": 11, "font-weight": 800, fill: visual.chartTextColor }, "As of current data");
+  makeText(svg, { x: plotLeft + 4, y: height - 16, "font-size": 11, "font-weight": 800, fill: visual.chartTextColor }, t("currentData"));
 
   let lx = width - 320;
   const legendY = height - 14;
@@ -1134,7 +1440,7 @@ function renderChart() {
   if (roadmapExifEnabled()) {
     const heatX = plotLeft + 300;
     drawHeatLegend(svg, heatX, legendY - 4, 58, 5);
-    makeText(svg, { x: heatX + 68, y: legendY, "font-size": 11, "font-weight": 850, fill: visual.chartTextColor }, "EXIF heatmap low → high");
+    makeText(svg, { x: heatX + 68, y: legendY, "font-size": 11, "font-weight": 850, fill: visual.chartTextColor }, t("heatLegend"));
   }
   state.styles.forEach(style => {
     const color = normalizeHexColor(style.color, visual.rangeFallbackColor);
@@ -1303,7 +1609,7 @@ function renderMountSelect() {
   if (!state.mounts.length) {
     const opt = document.createElement("option");
     opt.value = "";
-    opt.textContent = "마운트를 먼저 추가하세요";
+    opt.textContent = t("noMountOption");
     select.appendChild(opt);
     select.disabled = true;
     return;
@@ -1327,7 +1633,7 @@ function renderStyleSelect() {
   if (!state.styles.length) {
     const opt = document.createElement("option");
     opt.value = "";
-    opt.textContent = "스타일을 먼저 추가하세요";
+    opt.textContent = t("noStyleOption");
     select.appendChild(opt);
     select.disabled = true;
     return;
@@ -1351,7 +1657,7 @@ function renderMountSummary() {
   if (!state.mounts.length) {
     const pill = document.createElement("span");
     pill.className = "summary-pill";
-    pill.textContent = "마운트 없음";
+    pill.textContent = t("noMount");
     box.appendChild(pill);
     return;
   }
@@ -1435,7 +1741,7 @@ function setProgress(barId, textId, current, total, text) {
   const label = $(textId);
   const pct = total ? Math.min(100, Math.round((current / total) * 100)) : 0;
   if (bar) bar.style.width = `${pct}%`;
-  if (label) label.textContent = text || (total ? `${formatCount(current)} / ${formatCount(total)}` : "대기");
+  if (label) label.textContent = text || (total ? `${formatCount(current)} / ${formatCount(total)}` : t("idle"));
 }
 
 function resetExifSummary(total = 0) {
@@ -1470,7 +1776,7 @@ function renderExifLensTable(lenses) {
   if (!body) return;
   body.innerHTML = "";
   if (!lenses.length) {
-    emptyRow(body, 5, "아직 분석된 JPEG가 없습니다. 오른쪽에서 사진 폴더를 선택하세요.");
+    emptyRow(body, 5, t("noExifRows"));
     return;
   }
 
@@ -1498,7 +1804,11 @@ function renderExifHeatmap(result) {
   if (!lenses.length || !columns.length) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
-    empty.innerHTML = "<strong>히트맵 데이터가 없습니다.</strong><span>초점거리 EXIF가 있는 JPEG를 분석하면 여기에 표시됩니다.</span>";
+    const strong = document.createElement("strong");
+    strong.textContent = t("noHeatTitle");
+    const span = document.createElement("span");
+    span.textContent = t("noHeatDesc");
+    empty.append(strong, span);
     wrap.appendChild(empty);
     return;
   }
@@ -1534,7 +1844,7 @@ function renderExifHeatmap(result) {
         cell.style.background = color;
         cell.style.color = contrastColor(color);
         cell.textContent = formatCount(count);
-        cell.title = `${lens.lensName} · ${column}mm · ${formatCount(count)} files`;
+        cell.title = `${lens.lensName} · ${column}mm · ${formatCount(count)} ${t("files")}`;
       }
       row.appendChild(cell);
     });
@@ -1549,8 +1859,8 @@ function renderExifAnalysis() {
   const summary = exifAnalysis.summary;
   const result = exifAnalysis.result || { lenses: [], focalColumns: [], maxCellCount: 0 };
 
-  setProgress("photoScanProgressBar", "photoScanProgressText", scan.scanned, scan.total, scan.total ? `${formatCount(scan.scanned)} / ${formatCount(scan.total)} · JPG ${formatCount(scan.jpegs)} · RAW ${formatCount(scan.raws)}` : "대기");
-  setProgress("photoExifProgressBar", "photoExifProgressText", summary.processed, summary.total, summary.total ? `${formatCount(summary.processed)} / ${formatCount(summary.total)}` : "대기");
+  setProgress("photoScanProgressBar", "photoScanProgressText", scan.scanned, scan.total, scan.total ? `${formatCount(scan.scanned)} / ${formatCount(scan.total)} · JPG ${formatCount(scan.jpegs)} · RAW ${formatCount(scan.raws)}` : t("idle"));
+  setProgress("photoExifProgressBar", "photoExifProgressText", summary.processed, summary.total, summary.total ? `${formatCount(summary.processed)} / ${formatCount(summary.total)}` : t("idle"));
 
   const status = $("photoAnalysisStatus");
   if (status) status.textContent = exifAnalysis.status;
@@ -1572,7 +1882,7 @@ function renderExifAnalysis() {
   });
 
   const ignored = $("exifIgnoredText");
-  if (ignored) ignored.textContent = `중복 RAW ${formatCount(scan.rawIgnored)}개 제외 · 기타 ${formatCount(scan.otherIgnored)}개 제외 · 오류 ${formatCount(summary.errors)}개`;
+  if (ignored) ignored.textContent = t("duplicateIgnored", { raw: formatCount(scan.rawIgnored), other: formatCount(scan.otherIgnored), errors: formatCount(summary.errors) });
 
   renderExifLensTable(result.lenses || []);
   renderExifHeatmap(result);
@@ -1587,7 +1897,7 @@ async function analyzePhotoFolder(fileList) {
   exifAnalysis.scan = { total: fileList.length, scanned: 0, jpegs: 0, raws: 0, rawIgnored: 0, otherIgnored: 0 };
   exifAnalysis.result = { lenses: [], focalColumns: [], maxCellCount: 0 };
   resetExifSummary(0);
-  exifAnalysis.status = "폴더를 스캔하는 중입니다. 하위 폴더까지 포함해 JPEG와 RAW EXIF 후보를 골라냅니다.";
+  exifAnalysis.status = t("scanStatus");
   switchTab("Exif");
   renderExifAnalysis();
 
@@ -1636,13 +1946,13 @@ async function analyzePhotoFolder(fileList) {
   const photoFiles = [...photoEntries.values()];
   if (!photoFiles.length) {
     exifAnalysis.running = false;
-    exifAnalysis.status = "분석할 JPEG/RAW 파일을 찾지 못했습니다. 사진 파일이 있는 폴더를 선택하세요.";
+    exifAnalysis.status = t("noPhotoFiles");
     renderExifAnalysis();
     return;
   }
 
   resetExifSummary(photoFiles.length);
-  exifAnalysis.status = `${formatCount(photoFiles.length)}개 사진을 찾았습니다. JPG가 있는 동일 RAW는 제외했고, EXIF 캐시를 확인합니다.`;
+  exifAnalysis.status = t("foundPhotos", { count: formatCount(photoFiles.length) });
   renderExifAnalysis();
   startExifWorker(photoFiles);
 }
@@ -1650,7 +1960,7 @@ async function analyzePhotoFolder(fileList) {
 function startExifWorker(files) {
   if (!window.Worker) {
     exifAnalysis.running = false;
-    exifAnalysis.status = "이 브라우저는 Web Worker를 지원하지 않아 대용량 EXIF 분석을 실행할 수 없습니다.";
+    exifAnalysis.status = t("workerUnsupported");
     renderExifAnalysis();
     return;
   }
@@ -1662,7 +1972,7 @@ function startExifWorker(files) {
     const message = event.data || {};
     if (message.type === "progress") {
       exifAnalysis.summary = message.summary;
-      exifAnalysis.status = `EXIF 분석 중입니다. 캐시 ${formatCount(message.summary.cacheHits)}개, 신규 분석 ${formatCount(message.summary.parsed)}개.`;
+      exifAnalysis.status = t("analyzingExif", { cached: formatCount(message.summary.cacheHits), parsed: formatCount(message.summary.parsed) });
       renderExifAnalysis();
       return;
     }
@@ -1674,7 +1984,13 @@ function startExifWorker(files) {
       exifAnalysis.running = false;
       exifAnalysis.worker = null;
       const applied = applyExifStatsToRoadmap({ silent: true, render: false });
-      exifAnalysis.status = `분석 완료: ${formatCount(message.summary.processed)}개 사진, 렌즈 감지 ${formatCount(message.summary.withLens)}개, 초점거리 감지 ${formatCount(message.summary.withFocal)}개. 기존 렌즈 ${formatCount(applied.replaced)}개를 지우고 EXIF 렌즈 ${formatCount(applied.added)}개로 로드맵을 만들었습니다.`;
+      exifAnalysis.status = t("analysisDone", {
+        processed: formatCount(message.summary.processed),
+        lens: formatCount(message.summary.withLens),
+        focal: formatCount(message.summary.withFocal),
+        replaced: formatCount(applied.replaced),
+        added: formatCount(applied.added)
+      });
       worker.terminate();
       renderAll();
       switchTab("Exif");
@@ -1684,7 +2000,7 @@ function startExifWorker(files) {
     if (message.type === "cancelled") {
       exifAnalysis.running = false;
       exifAnalysis.worker = null;
-      exifAnalysis.status = "분석이 취소되었습니다.";
+      exifAnalysis.status = t("analysisCancelled");
       worker.terminate();
       renderExifAnalysis();
       return;
@@ -1719,20 +2035,20 @@ function cancelExifAnalysis(showStatus = true) {
     exifAnalysis.worker = null;
   }
   exifAnalysis.running = false;
-  if (showStatus) exifAnalysis.status = "분석이 취소되었습니다.";
+  if (showStatus) exifAnalysis.status = t("analysisCancelled");
   renderExifAnalysis();
 }
 
 function clearExifCache() {
   if (!window.indexedDB) {
-    alert("이 브라우저는 IndexedDB를 지원하지 않아 EXIF 캐시를 사용할 수 없습니다.");
+    alert(t("noIndexedDb"));
     return;
   }
   if (exifAnalysis.running) {
-    alert("분석이 진행 중일 때는 캐시를 초기화할 수 없습니다. 먼저 분석을 취소해 주세요.");
+    alert(t("cacheBusy"));
     return;
   }
-  if (!confirm("이 브라우저에 저장된 EXIF 분석 캐시를 삭제할까요? 사진 파일은 건드리지 않습니다.")) return;
+  if (!confirm(t("clearCacheConfirm"))) return;
 
   const dbNames = ["lensRoadmapExifCacheV6", "lensRoadmapExifCacheV5", "lensRoadmapExifCacheV4", "lensRoadmapExifCacheV3", "lensRoadmapExifCacheV2", "lensRoadmapExifCacheV1"];
   let done = 0;
@@ -1741,9 +2057,9 @@ function clearExifCache() {
     exifAnalysis.summary.cacheHits = 0;
     exifAnalysis.result = emptyExifResult();
     saveStoredExifResult(exifAnalysis.result);
-    exifAnalysis.status = "EXIF 캐시를 초기화했습니다. 다음 분석에서는 JPEG/RAW를 다시 읽습니다.";
+    exifAnalysis.status = t("cacheCleared");
     renderAll();
-    toast("EXIF 캐시를 초기화했습니다.");
+    toast(t("cacheClearedToast"));
   };
 
   dbNames.forEach(name => {
@@ -1754,10 +2070,10 @@ function clearExifCache() {
     };
     request.onerror = () => {
       failed = true;
-      alert("EXIF 캐시를 초기화하지 못했습니다. 브라우저 저장소 권한을 확인해 주세요.");
+      alert(t("clearCacheFailed"));
     };
     request.onblocked = () => {
-      exifAnalysis.status = "캐시 초기화가 대기 중입니다. 다른 탭에서 이 앱을 닫은 뒤 다시 시도해 주세요.";
+      exifAnalysis.status = t("clearCacheBlocked");
       renderExifAnalysis();
     };
   });
@@ -1772,14 +2088,14 @@ function renderTables() {
   lensBody.innerHTML = "";
 
   if (!state.mounts.length) {
-    emptyRow(mountBody, 5, "마운트가 없습니다. 프리셋을 누르거나 새 마운트를 추가하세요.");
+    emptyRow(mountBody, 5, t("noMountRows"));
   } else {
     const mountTmpl = $("mountRowTemplate");
     state.mounts.forEach(m => {
       const row = mountTmpl.content.cloneNode(true);
       row.querySelector(".mount-name").textContent = m.name;
       row.querySelector(".mount-crop").textContent = `x${clean(m.crop)}`;
-      row.querySelector(".mount-count").textContent = `${state.lenses.filter(l => l.mountId === m.id).length}개`;
+      row.querySelector(".mount-count").textContent = `${state.lenses.filter(l => l.mountId === m.id).length}${t("countUnit")}`;
       const swatch = document.createElement("div");
       swatch.className = "color-swatch";
       swatch.style.background = m.color;
@@ -1801,13 +2117,13 @@ function renderTables() {
   }
 
   if (!state.styles.length) {
-    emptyRow(styleBody, 6, "스타일이 없습니다. 기본 스타일이나 새 스타일을 추가하세요.");
+    emptyRow(styleBody, 6, t("noStyleRows"));
   } else {
     const styleTmpl = $("styleRowTemplate");
     state.styles.forEach(style => {
       const row = styleTmpl.content.cloneNode(true);
       row.querySelector(".style-name").textContent = style.name;
-      row.querySelector(".style-count").textContent = `${state.lenses.filter(l => l.styleId === style.id).length}개`;
+      row.querySelector(".style-count").textContent = `${state.lenses.filter(l => l.styleId === style.id).length}${t("countUnit")}`;
       const preview = stylePreview(style);
       const input = document.createElement("input");
       input.type = "color";
@@ -1821,7 +2137,7 @@ function renderTables() {
         renderChart();
       });
       row.querySelector(".style-preview-cell").append(preview, input);
-      row.querySelector(".style-dash").textContent = style.dash === "solid" ? "실선" : style.dash === "dash" ? "긴 점선" : "짧은 점선";
+      row.querySelector(".style-dash").textContent = style.dash === "solid" ? t("solid") : style.dash === "dash" ? t("dash") : t("dot");
       row.querySelector(".style-width").textContent = style.width;
       row.querySelector("button").addEventListener("click", () => deleteStyle(style.id));
       styleBody.appendChild(row);
@@ -1829,7 +2145,7 @@ function renderTables() {
   }
 
   if (!state.lenses.length) {
-    emptyRow(lensBody, 7, "아직 렌즈가 없습니다. 왼쪽의 렌즈 빠르게 추가 패널을 사용하세요.");
+    emptyRow(lensBody, 7, t("noLensRows"));
   } else {
     const lensTmpl = $("lensRowTemplate");
     state.lenses.forEach(lens => {
@@ -1860,6 +2176,180 @@ function renderAll() {
   renderTables();
   renderExifAnalysis();
   updateLensPreview();
+}
+
+function setText(selector, key) {
+  const node = document.querySelector(selector);
+  if (node) node.textContent = t(key);
+}
+
+function setAttr(selector, attr, key) {
+  const node = document.querySelector(selector);
+  if (node) node.setAttribute(attr, t(key));
+}
+
+function setFieldLabel(inputId, key) {
+  const field = $(inputId)?.closest(".field");
+  const label = field?.querySelector("span");
+  if (label) label.textContent = t(key);
+}
+
+function setPanelHead(anchorId, titleKey, descKey) {
+  const panel = $(anchorId)?.closest(".panel");
+  const head = panel?.querySelector(".panel-head div");
+  const title = head?.querySelector("h2");
+  const desc = head?.querySelector("p");
+  if (title) title.textContent = t(titleKey);
+  if (desc) desc.textContent = t(descKey);
+}
+
+function setOptions(selectId, labels) {
+  const select = $(selectId);
+  if (!select) return;
+  [...select.options].forEach(option => {
+    const key = labels[option.value];
+    if (key) option.textContent = t(key);
+  });
+}
+
+function setHeaders(selector, keys) {
+  const headers = document.querySelectorAll(selector);
+  keys.forEach((key, index) => {
+    if (headers[index]) headers[index].textContent = key ? t(key) : "";
+  });
+}
+
+function reorderSidebarPanels() {
+  const sidebar = document.querySelector(".sidebar");
+  const exifPanel = $("applyExifRoadmapBtn")?.closest(".panel");
+  if (sidebar && exifPanel && sidebar.firstElementChild !== exifPanel) {
+    sidebar.insertBefore(exifPanel, sidebar.firstElementChild);
+  }
+  [...sidebar?.querySelectorAll(".panel-head .step") || []].forEach((step, index) => {
+    step.textContent = String(index + 1).padStart(2, "0");
+  });
+}
+
+function applyLanguage() {
+  currentLanguage = ["ko", "en"].includes(currentLanguage) ? currentLanguage : "ko";
+  document.documentElement.lang = currentLanguage;
+  const langSelect = $("languageSelect");
+  if (langSelect) langSelect.value = currentLanguage;
+
+  setText(".brand h1", "appTitle");
+  setAttr(".top-actions", "aria-label", currentLanguage === "en" ? "Image export tools" : "이미지 저장 도구");
+  setText("#savePngBtn", "savePng");
+  setText("#saveJpgBtn", "saveJpg");
+  setText("#saveWebpBtn", "saveWebp");
+
+  setPanelHead("applyExifRoadmapBtn", "exifTitle", "exifDesc");
+  setPanelHead("addLensBtn", "quickTitle", "quickDesc");
+  setPanelHead("importSheetInput", "excelTitle", "excelDesc");
+  setPanelHead("chartTitle", "chartSettings", "chartDesc");
+  setPanelHead("addMountBtn", "mountTitle", "mountDesc");
+  setPanelHead("addStyleBtn", "styleTitle", "styleDesc");
+
+  setText("#applyExifRoadmapBtn", "applyExif");
+  setText("#cancelExifScanBtn", "cancelAnalysis");
+  setText("#clearExifCacheBtn", "clearExifCache");
+  const folderLabel = $("photoFolderInput")?.parentElement;
+  if (folderLabel) folderLabel.childNodes[0].textContent = t("folderPick");
+  const mobileLabel = $("photoFilesInput")?.parentElement;
+  if (mobileLabel) mobileLabel.childNodes[0].textContent = t("mobilePick");
+  const scanRows = document.querySelectorAll(".progress-row > div:first-child span");
+  if (scanRows[0]) scanRows[0].textContent = t("folderScan");
+  if (scanRows[1]) scanRows[1].textContent = t("exifAnalysis");
+
+  setFieldLabel("lensMount", "mount");
+  setFieldLabel("lensStyle", "style");
+  setFieldLabel("lensName", "lensName");
+  setAttr("#lensName", "placeholder", "lensPlaceholder");
+  setText("#parseLensBtn", "parseLens");
+  const formNote = $("parseLensBtn")?.parentElement?.querySelector(".form-note");
+  if (formNote) formNote.textContent = t("primeNote");
+  setFieldLabel("focalStart", "startMm");
+  setFieldLabel("focalEnd", "endMm");
+  setFieldLabel("lensType", "type");
+  const tcTitle = $("tc14")?.closest(".tc-box")?.querySelector("p");
+  if (tcTitle) tcTitle.textContent = t("teleconverterCompatible");
+  setText("#addLensBtn", "addLens");
+
+  setText("#downloadSheetTemplateBtn", "excelDownload");
+  const excelUpload = $("importSheetInput")?.parentElement;
+  if (excelUpload) excelUpload.childNodes[0].textContent = t("excelUpload");
+  setText(".sheet-note", "excelNote");
+  setText(".example-box summary", "exampleOpen");
+
+  setFieldLabel("chartTitle", "chartTitleLabel");
+  setFieldLabel("displayMode", "axisBasis");
+  setFieldLabel("labelMode", "topAxis");
+  setFieldLabel("scaleMode", "axisScale");
+  setFieldLabel("autoFitAxisBtn", "autoFitAxis");
+  setText("#autoFitAxisBtn", "fitCurrent");
+  setOptions("displayMode", { actual: "axisActual", equiv: "axisEquiv" });
+  setOptions("labelMode", { both: "labelBoth", actual: "labelActual", equiv: "labelEquiv" });
+  setOptions("scaleMode", { log: "logScale", linear: "linearScale" });
+  const toggles = document.querySelectorAll(".toggle-row");
+  if (toggles[0]) {
+    toggles[0].querySelector("strong").textContent = t("usedRangeOnly");
+    toggles[0].querySelector("p").textContent = t("usedRangeDesc");
+  }
+  setFieldLabel("axisMin", "axisMin");
+  setFieldLabel("axisMax", "axisMax");
+  if (toggles[1]) {
+    toggles[1].querySelector("strong").textContent = t("showTc");
+    toggles[1].querySelector("p").textContent = t("showTcDesc");
+  }
+  if (toggles[2]) {
+    toggles[2].querySelector("strong").textContent = t("showGuides");
+    toggles[2].querySelector("p").textContent = t("showGuidesDesc");
+  }
+  setFieldLabel("heatLowColor", "heatLow");
+  setFieldLabel("heatHighColor", "heatHigh");
+  setFieldLabel("chartBackgroundColor", "chartBg");
+  setFieldLabel("plotBackgroundColor", "plotBg");
+  setFieldLabel("chartLineColor", "lineColor");
+  setFieldLabel("chartGridColor", "gridColor");
+  setFieldLabel("rangeFallbackColor", "rangeColor");
+  setFieldLabel("chartTextColor", "textColor");
+
+  setFieldLabel("newMountName", "newMountName");
+  setFieldLabel("newMountCrop", "cropFactor");
+  setFieldLabel("newMountColor", "mountColor");
+  setText("#addMountBtn", "addMount");
+  setFieldLabel("newStyleName", "newStyleName");
+  setFieldLabel("newStyleColor", "color");
+  setFieldLabel("newStyleDash", "lineShape");
+  setOptions("newStyleDash", { solid: "solid", dash: "dash", dot: "dot" });
+  setFieldLabel("newStyleWidth", "lineWidth");
+  setFieldLabel("newStyleWeight", "textWeight");
+  setOptions("newStyleWeight", { 650: "normal", 800: "bold" });
+  setText("#addStyleBtn", "addStyle");
+  setText("#loadSampleBtn", "reloadSample");
+  setText("#exportJsonBtn", "backupJson");
+  const jsonImport = $("importJsonInput")?.parentElement;
+  if (jsonImport) jsonImport.childNodes[0].textContent = t("importJson");
+  setText("#clearBtn", "clearAll");
+
+  setText(".chart-toolbar .section-label", "livePreview");
+  setText(".legend-note", "exportNote");
+  setText("#emptyState strong", "emptyTitle");
+  setText("#emptyState span", "emptyDesc");
+  setText("#tabMounts", "tabMounts");
+  setText("#tabStyles", "tabStyles");
+  setText("#tabLenses", "tabLenses");
+  setText("#tabExif", "tabExif");
+  setHeaders("#mountPanel th", ["mount", "cropFactor", "photoCount", "color", ""]);
+  setHeaders("#stylePanel th", ["style", "photoCount", null, "lineShape", "lineWidth", ""]);
+  setHeaders("#lensPanel th", ["lensName", "mount", "type", "axisActual", "axisEquiv", "style", ""]);
+  setHeaders("#exifPanel .stat-card span", ["targetFiles", "processed", "cacheUsed", "lensDetected"]);
+  const exifHeads = document.querySelectorAll("#exifPanel .exif-section-head h2");
+  if (exifHeads[0]) exifHeads[0].textContent = t("lensUsage");
+  if (exifHeads[1]) exifHeads[1].textContent = t("heatmapTitle");
+  setText("#exifIgnoredText", "jpgPriority");
+  setHeaders("#exifPanel .exif-table-wrap th", ["lensName", "photoCount", "focalRange", "equivRange", "topFocals"]);
+  const heatPill = document.querySelectorAll("#exifPanel .muted-pill")[1];
+  if (heatPill) heatPill.textContent = t("strongerMore");
 }
 
 function slug(text) {
@@ -1972,11 +2462,11 @@ function updateLensPreview() {
   if (addBtn) addBtn.disabled = !canAddBase;
 
   if (!state.mounts.length) {
-    preview.textContent = "먼저 마운트를 추가해 주세요. 프리셋을 누르면 바로 시작할 수 있습니다.";
+    preview.textContent = t("addMountFirst");
     return;
   }
   if (!state.styles.length) {
-    preview.textContent = "먼저 스타일을 추가해 주세요.";
+    preview.textContent = t("addStyleFirst");
     return;
   }
 
@@ -1993,7 +2483,7 @@ function updateLensPreview() {
     end: Math.max(start, end)
   };
   const mount = mountById(lens.mountId);
-  preview.textContent = `${mount?.name || "선택된 마운트"} · 실제 ${actualRange(lens)} · 35mm 환산 ${equivRange(lens)} · 환산값은 상단 축에서 표시됩니다.`;
+  preview.textContent = t("previewRange", { mount: mount?.name || t("selectedMount"), actual: actualRange(lens), equiv: equivRange(lens) });
 }
 
 function addLens() {
@@ -2393,6 +2883,14 @@ function switchTab(tab) {
 }
 
 function bind() {
+  $("languageSelect")?.addEventListener("change", event => {
+    currentLanguage = event.target.value;
+    localStorage.setItem(LANG_KEY, currentLanguage);
+    if (!exifAnalysis.running && !exifAnalysis.summary.total) exifAnalysis.status = t("privacy");
+    applyLanguage();
+    renderAll();
+  });
+
   $("addMountBtn").addEventListener("click", () => {
     addMount($("newMountName").value, $("newMountCrop").value, $("newMountColor").value);
     $("newMountName").value = "";
@@ -2502,7 +3000,9 @@ function bind() {
   $("tabExif").addEventListener("click", () => switchTab("Exif"));
 }
 
+reorderSidebarPanels();
 bind();
 applyChartSettingsToDom();
 applyVisualSettingsToDom();
+applyLanguage();
 renderAll();
