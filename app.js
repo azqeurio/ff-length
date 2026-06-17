@@ -737,6 +737,14 @@ function heatColor(count, max, minVisible = 0) {
   return mixColor(settings.heatLowColor, settings.heatHighColor, heatRatio(count, max, minVisible));
 }
 
+function smoothHeatColor(ratio) {
+  const settings = currentVisualSettings();
+  const cutoff = .018;
+  if (!Number.isFinite(ratio) || ratio <= cutoff) return settings.heatLowColor;
+  const shaped = Math.pow(clamp((ratio - cutoff) / (1 - cutoff), 0, 1), .62);
+  return mixColor(settings.heatLowColor, settings.heatHighColor, shaped);
+}
+
 function activeTeleconverters() {
   const enabled = $("showTeleconverters")?.checked;
   return {
@@ -1202,9 +1210,19 @@ function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatM
 
   const maxCount = Math.max(1, Number(heatMax) || heatMaxForResult());
   const barH = Math.max(8, Number(item.style.width) + 6);
+  const borderW = 1.15;
+  const inset = borderW + .35;
+  const outerY = item.cy - barH / 2;
+  const innerStart = lineStart + inset;
+  const innerEnd = lineEnd - inset;
+  const innerW = innerEnd - innerStart;
+  const innerY = outerY + inset;
+  const innerH = Math.max(1, barH - inset * 2);
+  if (innerW <= 1 || innerH <= 1) return false;
+
   const pxEntries = entries
     .map(entry => {
-      const px = clamp(leftChart + x(displayValue(item.lens, entry.focal)), lineStart, lineEnd);
+      const px = clamp(leftChart + x(displayValue(item.lens, entry.focal)), innerStart, innerEnd);
       return { ...entry, px };
     })
     .sort((a, b) => a.px - b.px);
@@ -1212,31 +1230,61 @@ function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatM
 
   makeEl(svg, "rect", {
     x: lineStart,
-    y: item.cy - barH / 2,
+    y: outerY,
     width: lineW,
     height: barH,
     fill: visual.heatLowColor,
-    stroke: visual.chartLineColor,
-    "stroke-width": 1.15,
     opacity: .98
   });
 
-  pxEntries.forEach((entry, index) => {
-    const prevPx = pxEntries[index - 1]?.px ?? lineStart;
-    const nextPx = pxEntries[index + 1]?.px ?? lineEnd;
-    const leftSpan = Math.max(1, entry.px - prevPx);
-    const rightSpan = Math.max(1, nextPx - entry.px);
-    const width = clamp(Math.min(leftSpan, rightSpan) * .72, 7, Math.max(12, lineW / 16));
-    const xPos = clamp(entry.px - width / 2, lineStart, lineEnd - width);
-    const color = heatColor(entry.count, maxCount);
-    makeEl(svg, "rect", {
-      x: xPos,
-      y: item.cy - barH / 2,
-      width,
-      height: barH,
-      fill: color,
-      opacity: 1
+  const clipId = `heat-clip-${uid()}`;
+  const clipPath = makeEl(defs, "clipPath", { id: clipId });
+  makeEl(clipPath, "rect", { x: innerStart, y: innerY, width: innerW, height: innerH });
+
+  const heatLayer = makeEl(svg, "g", { "clip-path": `url(#${clipId})` });
+  const heatSpots = pxEntries.map((entry, index) => {
+    const prevGap = index > 0 ? entry.px - pxEntries[index - 1].px : Infinity;
+    const nextGap = index < pxEntries.length - 1 ? pxEntries[index + 1].px - entry.px : Infinity;
+    const nearestGap = Math.min(prevGap, nextGap);
+    const sigma = Number.isFinite(nearestGap)
+      ? clamp(nearestGap * .45, 4.5, 9.5)
+      : clamp(innerW * .026, 6, 12);
+    return {
+      px: entry.px,
+      ratio: clamp(entry.count / maxCount, 0, 1),
+      sigma
+    };
+  });
+  const segments = Math.max(90, Math.min(640, Math.ceil(innerW)));
+  const segmentW = innerW / segments;
+
+  for (let index = 0; index < segments; index += 1) {
+    const stripX = innerStart + segmentW * index;
+    const sampleX = stripX + segmentW / 2;
+    const ratio = clamp(heatSpots.reduce((sum, spot) => {
+      const distance = sampleX - spot.px;
+      const weight = Math.exp(-0.5 * (distance / spot.sigma) ** 2);
+      return sum + spot.ratio * weight;
+    }, 0), 0, 1);
+    const color = smoothHeatColor(ratio);
+    if (color === visual.heatLowColor) continue;
+    makeEl(heatLayer, "rect", {
+      x: stripX,
+      y: innerY,
+      width: segmentW + .35,
+      height: innerH,
+      fill: color
     });
+  }
+
+  makeEl(svg, "rect", {
+    x: lineStart,
+    y: outerY,
+    width: lineW,
+    height: barH,
+    fill: "none",
+    stroke: visual.chartLineColor,
+    "stroke-width": borderW
   });
 
   return true;
