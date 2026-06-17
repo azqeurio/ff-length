@@ -1,6 +1,6 @@
 importScripts("vendor/dexie.min.js", "vendor/exifr.full.umd.js");
 
-const DB_NAME = "lensRoadmapExifCacheV5";
+const DB_NAME = "lensRoadmapExifCacheV6";
 const BATCH_SIZE = 96;
 const UNKNOWN_LENS = "Unknown lens";
 const EXIF_PICK = [
@@ -371,12 +371,14 @@ function focalAlreadyTeleconverted(focal, range, adjustedRange) {
 }
 
 function focalRangeFromTags(tags = {}, lensName = "") {
+  const nameRange = focalRangeFromText(lensName);
+  if (nameRange) return nameRange;
+
   const directMin = roundFocal(numericValue(tags.MinFocalLength));
   const directMax = roundFocal(numericValue(tags.MaxFocalLength));
   if (directMin && directMax) return { start: Math.min(directMin, directMax), end: Math.max(directMin, directMax) };
 
-  const textRange = focalRangeFromText(lensName)
-    || focalRangeFromText(textValue(tags.LensInfo))
+  const textRange = focalRangeFromText(textValue(tags.LensInfo))
     || focalRangeFromText(textValue(tags.LensSpecification))
     || focalRangeFromText(textValue(tags.LensSpec))
     || focalRangeFromText(textValue(tags.LensType));

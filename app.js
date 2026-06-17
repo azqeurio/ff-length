@@ -328,7 +328,7 @@ function inferredCropForLensName(name) {
   const text = String(name || "").toLowerCase();
   if (!text) return null;
   if (/\b(lumix\s+s|lumix\s+s\s+pro|sigma\s+s|leica\s+sl|sony\s+fe|nikon\s+z|canon\s+rf)\b/.test(text)) return null;
-  if (/(?:^|\b)(m\.?\s*zuiko|olympus\s+m\.?\s*\d+|olympus\s+m\s+\d+|om\s+\d+|om-system|om system|leica\s+dg|lumix\s+g|panasonic\s+g)(?:\b|$)/.test(text)) return 2;
+  if (/(?:^|\b)(m\.?\s*zuiko|m\.\s*\d|olympus\s+m\.?\s*\d+|olympus\s+m\s+\d+|om\s+\d+|om-system|om system|leica\s+dg|lumix\s+g|panasonic\s+g)(?:\b|$)/.test(text)) return 2;
   return null;
 }
 
@@ -490,6 +490,23 @@ function focalRangeWithTeleconverter(text) {
   return applyTeleconverterRange(range, teleconverterFactorFromText(text));
 }
 
+function teleconverterFactorForStats(stats) {
+  return Math.max(teleconverterFactorFromText(stats?.lensName), Number(stats?.teleconverterFactor) || 1);
+}
+
+function focalRangeForStats(stats) {
+  const parsed = parseFocalRange(stats?.lensName);
+  if (parsed) return applyTeleconverterRange(parsed, teleconverterFactorForStats(stats));
+  if (stats?.lensMin && stats?.lensMax) {
+    return {
+      start: Math.min(Number(stats.lensMin), Number(stats.lensMax)),
+      end: Math.max(Number(stats.lensMin), Number(stats.lensMax)),
+      type: Number(stats.lensMin) === Number(stats.lensMax) ? "prime" : "zoom"
+    };
+  }
+  return null;
+}
+
 function scaleFactory(min, max, width) {
   if ($("scaleMode").value === "log") {
     const a = Math.log(min);
@@ -642,7 +659,7 @@ function normalizeLensLookupName(name) {
 }
 
 function statsFocalRange(stats) {
-  const parsed = focalRangeWithTeleconverter(stats?.lensName);
+  const parsed = focalRangeForStats(stats);
   if (parsed) return parsed;
   if (stats?.lensMin && stats?.lensMax) return { start: stats.lensMin, end: stats.lensMax };
   if (!stats?.focalCounts) return null;
@@ -728,20 +745,71 @@ function activeTeleconverters() {
   };
 }
 
+function rawFocalEntries(stats) {
+  return Object.entries(stats?.focalCounts || {})
+    .map(([focal, count]) => ({ focal: Number(focal), count: Number(count) || 0 }))
+    .filter(item => Number.isFinite(item.focal) && item.focal > 0 && item.count > 0);
+}
+
+function mergeFocalEntries(entries, mapper) {
+  const merged = new Map();
+  entries.forEach(entry => {
+    const focal = Math.round(Number(mapper(entry.focal)) * 10) / 10;
+    if (!Number.isFinite(focal) || focal <= 0) return;
+    merged.set(focal, (merged.get(focal) || 0) + entry.count);
+  });
+  return [...merged.entries()]
+    .map(([focal, count]) => ({ focal: Number(focal), count }))
+    .sort((a, b) => a.focal - b.focal);
+}
+
+function scoreFocalEntries(entries, start, end) {
+  const total = entries.reduce((sum, entry) => sum + entry.count, 0);
+  if (!total) return { ratio: 0, inside: 0 };
+  const inside = entries
+    .filter(entry => entry.focal >= start - .5 && entry.focal <= end + .5)
+    .reduce((sum, entry) => sum + entry.count, 0);
+  return { ratio: inside / total, inside };
+}
+
 function focalEntriesForLens(lens, stats) {
   const start = Number(lens.start);
   const end = Number(lens.end);
-  const factor = Number(stats?.teleconverterFactor) || teleconverterFactorFromText(stats?.lensName);
+  const rawEntries = rawFocalEntries(stats);
+  if (!rawEntries.length) return [];
+
+  const factor = teleconverterFactorForStats(stats);
   const baseRange = parseFocalRange(stats?.lensName);
-  const shouldAdjustLegacyTc = factor > 1 && !stats?.teleconverterApplied && baseRange;
-  return Object.entries(stats?.focalCounts || {})
-    .map(([focal, count]) => {
-      const rawFocal = Number(focal);
-      const adjustedFocal = shouldAdjustLegacyTc && rawFocal >= baseRange.start - .5 && rawFocal <= baseRange.end + .5
-        ? Math.round(rawFocal * factor * 10) / 10
-        : rawFocal;
-      return { focal: adjustedFocal, count: Number(count) || 0 };
-    })
+  const crop = cropForLens(lens);
+  const candidates = [
+    { name: "raw", priority: 3, entries: mergeFocalEntries(rawEntries, focal => focal) }
+  ];
+
+  if (crop > 1.05) {
+    candidates.push({
+      name: "35mm-to-actual",
+      priority: 2,
+      entries: mergeFocalEntries(rawEntries, focal => focal / crop)
+    });
+  }
+
+  if (factor > 1 && !stats?.teleconverterApplied && baseRange) {
+    candidates.push({
+      name: "legacy-teleconverter",
+      priority: 4,
+      entries: mergeFocalEntries(rawEntries, focal => (
+        focal >= baseRange.start - .5 && focal <= baseRange.end + .5 ? focal * factor : focal
+      ))
+    });
+  }
+
+  const best = candidates
+    .map(candidate => ({ ...candidate, score: scoreFocalEntries(candidate.entries, start, end) }))
+    .sort((a, b) => b.score.ratio - a.score.ratio || b.score.inside - a.score.inside || b.priority - a.priority)[0];
+
+  if (!best || best.score.inside <= 0) return [];
+
+  return best.entries
     .filter(item => Number.isFinite(item.focal) && item.count > 0 && item.focal >= start - .5 && item.focal <= end + .5)
     .sort((a, b) => a.focal - b.focal);
 }
@@ -792,7 +860,8 @@ function applyExifStatsToRoadmap(options = {}) {
   let skipped = 0;
 
   lenses.forEach(stats => {
-    const parsedRange = focalRangeWithTeleconverter(stats.lensName);
+    const crop = inferredCropForLensName(stats.lensName) || normalizedCropEstimate(stats.cropEstimate) || fallbackCrop;
+    const parsedRange = focalRangeForStats(stats);
     const rawStart = parsedRange?.start ?? stats.lensMin ?? stats.focalMin;
     const rawEnd = parsedRange?.end ?? stats.lensMax ?? stats.focalMax;
     if (!rawStart || !rawEnd || /^unknown lens$/i.test(stats.lensName || "")) {
@@ -800,7 +869,6 @@ function applyExifStatsToRoadmap(options = {}) {
       return;
     }
 
-    const crop = inferredCropForLensName(stats.lensName) || normalizedCropEstimate(stats.cropEstimate) || fallbackCrop;
     const mount = ensureExifRoadmapMount(crop);
     const start = Math.min(Number(rawStart), Number(rawEnd));
     const end = Math.max(Number(rawStart), Number(rawEnd));
@@ -1097,14 +1165,16 @@ function drawZoomFallbackHeatLine(svg, item, stats, heatMax) {
   const lineStart = Math.min(item.startX, item.endX);
   const lineEnd = Math.max(item.startX, item.endX);
   if (lineEnd <= lineStart + 1) return;
+  const visual = currentVisualSettings();
   const width = Math.max(8, Number(item.style.width) + 6);
-  const color = heatColor(heatValueForLensStats(stats), heatMax, .04);
+  const hasFocalCounts = rawFocalEntries(stats).length > 0;
+  const color = hasFocalCounts ? visual.heatLowColor : heatColor(heatValueForLensStats(stats), heatMax, .04);
   makeEl(svg, "line", {
     x1: lineStart,
     y1: item.cy,
     x2: lineEnd,
     y2: item.cy,
-    stroke: currentVisualSettings().chartLineColor,
+    stroke: visual.chartLineColor,
     "stroke-width": width + 2,
     "stroke-linecap": "butt",
     opacity: .68
@@ -1165,8 +1235,6 @@ function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatM
       width,
       height: barH,
       fill: color,
-      stroke: visual.chartLineColor,
-      "stroke-width": .7,
       opacity: 1
     });
   });
@@ -1618,7 +1686,7 @@ function clearExifCache() {
   }
   if (!confirm("이 브라우저에 저장된 EXIF 분석 캐시를 삭제할까요? 사진 파일은 건드리지 않습니다.")) return;
 
-  const dbNames = ["lensRoadmapExifCacheV5", "lensRoadmapExifCacheV4", "lensRoadmapExifCacheV3", "lensRoadmapExifCacheV2", "lensRoadmapExifCacheV1"];
+  const dbNames = ["lensRoadmapExifCacheV6", "lensRoadmapExifCacheV5", "lensRoadmapExifCacheV4", "lensRoadmapExifCacheV3", "lensRoadmapExifCacheV2", "lensRoadmapExifCacheV1"];
   let done = 0;
   let failed = false;
   const finish = () => {
