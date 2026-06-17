@@ -720,14 +720,6 @@ function heatColor(count, max, minVisible = 0) {
   return mixColor(settings.heatLowColor, settings.heatHighColor, heatRatio(count, max, minVisible));
 }
 
-function heatColorWithCutoff(count, max, cutoff = .1) {
-  const settings = currentVisualSettings();
-  const ratio = heatRatio(count, max, 0);
-  if (ratio < cutoff) return settings.heatLowColor;
-  const compressed = Math.pow(clamp((ratio - cutoff) / (1 - cutoff), 0, 1), .68);
-  return mixColor(settings.heatLowColor, settings.heatHighColor, compressed);
-}
-
 function activeTeleconverters() {
   const enabled = $("showTeleconverters")?.checked;
   return {
@@ -1013,7 +1005,7 @@ function renderChart() {
         const maskX = anchor === "start" ? labelX - 3 : labelX - labelW - 3;
         const redraw = () => {
           const primeColor = exifStats ? heatColor(heatValueForLensStats(exifStats), heatMaxForResult(), .04) : color;
-          makeEl(svg, "circle", { cx: startX, cy, r: exifStats ? 5.7 : 4.5, fill: primeColor, stroke: exifStats ? visual.chartBackgroundColor : "", "stroke-width": exifStats ? 1.5 : "" });
+          makeEl(svg, "circle", { cx: startX, cy, r: exifStats ? 5.7 : 4.5, fill: primeColor, stroke: exifStats ? visual.chartLineColor : "", "stroke-width": exifStats ? 1.15 : "" });
           makeEl(svg, "rect", { x: maskX, y: cy - 9, width: labelW + 6, height: 15, fill: visual.plotBackgroundColor });
           makeText(svg, { x: labelX, y: cy + 4, "font-size": 10.8, "font-weight": 850, "text-anchor": anchor, fill: visual.chartTextColor }, label);
         };
@@ -1021,8 +1013,9 @@ function renderChart() {
         return;
       }
 
-      const markerColor = exifStats ? heatColor(heatValueForLensStats(exifStats), heatMaxForResult(), .04) : color;
-      makeEl(svg, "rect", { x: startX - 6, y: cy - 5, width: 8, height: 10, fill: markerColor });
+      if (!exifStats) {
+        makeEl(svg, "rect", { x: startX - 6, y: cy - 5, width: 8, height: 10, fill: color });
+      }
       const heatDrawn = exifStats ? drawZoomHeatmapLine(svg, defs, item, exifStats, leftChart, chartW, x, heatMaxForResult()) : false;
       if (exifStats && !heatDrawn) {
         drawZoomFallbackHeatLine(svg, item, exifStats, heatMaxForResult());
@@ -1093,45 +1086,29 @@ function drawHeatLegend(svg, x, y, width, strokeWidth) {
       y1: y,
       x2,
       y2: y,
-      stroke: heatColorWithCutoff(count, 100, .2),
+      stroke: heatColor(count, 100),
       "stroke-width": strokeWidth,
       "stroke-linecap": index === 0 || index === segments - 1 ? "round" : "butt"
     });
   }
 }
 
-function interpolateHeatCount(offset, stops) {
-  if (!stops.length) return 0;
-  if (offset <= stops[0].offset) return stops[0].count;
-  for (let index = 1; index < stops.length; index += 1) {
-    const prev = stops[index - 1];
-    const next = stops[index];
-    if (offset <= next.offset) {
-      const span = Math.max(.001, next.offset - prev.offset);
-      const linear = (offset - prev.offset) / span;
-      const smooth = linear * linear * (3 - 2 * linear);
-      return prev.count + (next.count - prev.count) * smooth;
-    }
-  }
-  return stops[stops.length - 1].count;
-}
-
-function smoothedHeatCount(offset, stops, sigma) {
-  if (!stops.length) return 0;
-  const spread = Math.max(.25, Number(sigma) || 1);
-  return stops.reduce((peak, stop) => {
-    const distance = offset - stop.offset;
-    const weight = Math.exp(-0.5 * (distance / spread) ** 2);
-    return Math.max(peak, stop.count * weight);
-  }, 0);
-}
-
 function drawZoomFallbackHeatLine(svg, item, stats, heatMax) {
   const lineStart = Math.min(item.startX, item.endX);
   const lineEnd = Math.max(item.startX, item.endX);
   if (lineEnd <= lineStart + 1) return;
-  const width = Math.max(7, Number(item.style.width) + 5);
-  const color = heatColorWithCutoff(heatValueForLensStats(stats), heatMax, .22);
+  const width = Math.max(8, Number(item.style.width) + 6);
+  const color = heatColor(heatValueForLensStats(stats), heatMax, .04);
+  makeEl(svg, "line", {
+    x1: lineStart,
+    y1: item.cy,
+    x2: lineEnd,
+    y2: item.cy,
+    stroke: currentVisualSettings().chartLineColor,
+    "stroke-width": width + 2,
+    "stroke-linecap": "butt",
+    opacity: .68
+  });
   makeEl(svg, "line", {
     x1: lineStart,
     y1: item.cy,
@@ -1148,61 +1125,51 @@ function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatM
   if (!entries.length) return false;
 
   const visual = currentVisualSettings();
-  const lensStart = Number(item.lens.start);
-  const lensEnd = Number(item.lens.end);
   const lineStart = Math.min(item.startX, item.endX);
   const lineEnd = Math.max(item.startX, item.endX);
   const lineW = lineEnd - lineStart;
   if (lineW <= 1) return false;
 
   const maxCount = Math.max(1, Number(heatMax) || heatMaxForResult());
-  const width = Math.max(7, Number(item.style.width) + 5);
-  const measuredStops = entries
+  const barH = Math.max(8, Number(item.style.width) + 6);
+  const pxEntries = entries
     .map(entry => {
       const px = clamp(leftChart + x(displayValue(item.lens, entry.focal)), lineStart, lineEnd);
-      return {
-        offset: clamp(((px - lineStart) / lineW) * 100, 0, 100),
-        count: entry.count
-      };
+      return { ...entry, px };
     })
-    .sort((a, b) => a.offset - b.offset);
+    .sort((a, b) => a.px - b.px);
+  if (!pxEntries.length) return false;
 
-  const stops = measuredStops.slice();
-  if (!stops.length) return false;
-  if (entries[0].focal > lensStart + .2) stops.unshift({ offset: 0, count: 0 });
-  else if (stops[0].offset > 0) stops.unshift({ offset: 0, count: stops[0].count });
-  if (entries[entries.length - 1].focal < lensEnd - .2) stops.push({ offset: 100, count: 0 });
-  else if (stops[stops.length - 1].offset < 100) stops.push({ offset: 100, count: stops[stops.length - 1].count });
-
-  makeEl(svg, "line", {
-    x1: lineStart,
-    y1: item.cy,
-    x2: lineEnd,
-    y2: item.cy,
-    stroke: heatColor(0, maxCount),
-    "stroke-width": width + 1.5,
-    "stroke-linecap": "butt",
-    opacity: .75
+  makeEl(svg, "rect", {
+    x: lineStart,
+    y: item.cy - barH / 2,
+    width: lineW,
+    height: barH,
+    fill: visual.heatLowColor,
+    stroke: visual.chartLineColor,
+    "stroke-width": 1.15,
+    opacity: .98
   });
 
-  const segments = Math.max(180, Math.min(900, Math.ceil(lineW / 1.35)));
-  const sigma = clamp(100 / Math.max(96, measuredStops.length * 9), .42, 1.05);
-  for (let index = 0; index < segments; index += 1) {
-    const offset1 = (index / segments) * 100;
-    const offset2 = ((index + 1) / segments) * 100;
-    const midOffset = (offset1 + offset2) / 2;
-    const x1 = lineStart + (lineW * offset1) / 100;
-    const x2 = lineStart + (lineW * offset2) / 100 + .2;
-    makeEl(svg, "line", {
-      x1,
-      y1: item.cy,
-      x2,
-      y2: item.cy,
-      stroke: heatColorWithCutoff(smoothedHeatCount(midOffset, measuredStops, sigma), maxCount, .28),
-      "stroke-width": width,
-      "stroke-linecap": "butt"
+  pxEntries.forEach((entry, index) => {
+    const prevPx = pxEntries[index - 1]?.px ?? lineStart;
+    const nextPx = pxEntries[index + 1]?.px ?? lineEnd;
+    const leftSpan = Math.max(1, entry.px - prevPx);
+    const rightSpan = Math.max(1, nextPx - entry.px);
+    const width = clamp(Math.min(leftSpan, rightSpan) * .72, 7, Math.max(12, lineW / 16));
+    const xPos = clamp(entry.px - width / 2, lineStart, lineEnd - width);
+    const color = heatColor(entry.count, maxCount);
+    makeEl(svg, "rect", {
+      x: xPos,
+      y: item.cy - barH / 2,
+      width,
+      height: barH,
+      fill: color,
+      stroke: visual.chartLineColor,
+      "stroke-width": .7,
+      opacity: 1
     });
-  }
+  });
 
   return true;
 }

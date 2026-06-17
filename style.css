@@ -1,5 +1,5 @@
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
   --bg: #edf2f7;
   --surface: #ffffff;
   --surface-soft: #f6f8fb;
@@ -608,6 +608,22 @@ input[type="color"] {
   min-width: 0;
   max-height: calc(100vh - 158px);
   height: auto;
+  color-scheme: only light;
+  forced-color-adjust: none;
+}
+
+#chart *,
+.heatmap-wrap,
+.heatmap-table,
+.heatmap-cell {
+  forced-color-adjust: none;
+}
+
+.chart-scroll,
+.heatmap-wrap,
+.heatmap-table,
+.heatmap-cell {
+  color-scheme: only light;
 }
 
 .empty-state {
@@ -857,6 +873,166 @@ tr:last-child td { border-bottom: 0; }
   box-shadow: 0 14px 40px rgba(15, 23, 42, .25);
   font-size: 13px;
   font-weight: 850;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b1120;
+    --surface: #111827;
+    --surface-soft: #172033;
+    --surface-blue: #10213d;
+    --text: #e5e7eb;
+    --muted: #9aa9bd;
+    --subtle: #748399;
+    --line: #273449;
+    --line-strong: #334155;
+    --blue: #60a5fa;
+    --blue-dark: #3b82f6;
+    --danger: #fca5a5;
+    --danger-bg: #3b1414;
+    --shadow: 0 18px 42px rgba(0, 0, 0, .28);
+  }
+
+  html {
+    background: linear-gradient(180deg, #111827 0, #0b1120 360px, #090d16 100%);
+  }
+
+  .intro {
+    background: rgba(17, 24, 39, .84);
+  }
+
+  .intro p:last-child,
+  .field > span,
+  .tc-box p,
+  .progress-row > div:first-child,
+  .lens-preview,
+  .chip,
+  .summary-pill,
+  th {
+    color: var(--muted);
+  }
+
+  .panel,
+  .chart-card,
+  .data-card {
+    box-shadow: 0 14px 32px rgba(0, 0, 0, .24);
+  }
+
+  .panel-accent,
+  .stat-card {
+    background: linear-gradient(180deg, #111827 0, #0f172a 100%);
+  }
+
+  input,
+  select,
+  .btn,
+  .file-btn,
+  .chip,
+  .summary-pill,
+  .small-btn {
+    background: #0f172a;
+    color: var(--text);
+    border-color: var(--line-strong);
+  }
+
+  input:disabled,
+  select:disabled {
+    background: #182235;
+  }
+
+  .btn:hover,
+  .file-btn:hover,
+  .chip:hover {
+    border-color: #526176;
+    box-shadow: 0 10px 22px rgba(0, 0, 0, .25);
+  }
+
+  .btn-soft {
+    color: #bfdbfe;
+    background: #172554;
+    border-color: #1d4ed8;
+  }
+
+  .btn-danger {
+    color: #fecaca;
+    background: #3b1414;
+    border-color: #7f1d1d;
+  }
+
+  .color-control-grid,
+  .example-box,
+  .tc-box,
+  .lens-preview,
+  .toggle-row {
+    background: #0f172a;
+    border-color: var(--line);
+  }
+
+  .example-box summary {
+    color: #93c5fd;
+  }
+
+  .switch span {
+    background: #475569;
+  }
+
+  .switch span::after {
+    background: #e5e7eb;
+  }
+
+  .chart-toolbar,
+  .empty-state {
+    background: var(--surface);
+  }
+
+  .chart-scroll {
+    background: #0f172a;
+  }
+
+  table {
+    border-color: var(--line);
+    background: var(--surface);
+  }
+
+  th,
+  td {
+    border-bottom-color: var(--line);
+  }
+
+  .top-focal-list span {
+    color: #bfdbfe;
+    background: #172554;
+  }
+
+  .progress-bar {
+    background: #1f2937;
+  }
+
+  .heatmap-wrap,
+  .heatmap-table {
+    border-color: #d9e2ee;
+    background: #fff;
+  }
+
+  .heatmap-table th {
+    color: #334155;
+    background: #f6f8fb;
+  }
+
+  .heatmap-table th:first-child,
+  .heatmap-table td:first-child {
+    color: #0f172a;
+    background: #fff;
+    box-shadow: 1px 0 0 #e9eef5;
+  }
+
+  .heatmap-cell {
+    color: #0f172a;
+  }
+
+  .heatmap-cell.empty {
+    background: #f8fafc;
+  }
 }
 
 @media (min-width: 1181px) {
