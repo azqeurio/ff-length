@@ -1112,7 +1112,7 @@ function heatRatio(count, max, minVisible = 0) {
   if (value <= 0) return 0;
   const maxValue = Math.max(1, Number(max) || 1);
   const baseRatio = clamp(Math.log1p(value) / Math.log1p(maxValue), 0, 1);
-  const emphasized = Math.pow(baseRatio, .62);
+  const emphasized = Math.pow(baseRatio, .95);
   return Math.max(emphasized, minVisible);
 }
 
@@ -1123,9 +1123,9 @@ function heatColor(count, max, minVisible = 0) {
 
 function smoothHeatColor(ratio, highColor = currentVisualSettings().heatHighColor) {
   const settings = currentVisualSettings();
-  const cutoff = .004;
+  const cutoff = .012;
   if (!Number.isFinite(ratio) || ratio <= cutoff) return settings.heatLowColor;
-  const shaped = Math.pow(clamp((ratio - cutoff) / (1 - cutoff), 0, 1), .58);
+  const shaped = Math.pow(clamp((ratio - cutoff) / (1 - cutoff), 0, 1), .9);
   return mixColor(settings.heatLowColor, normalizeHexColor(highColor, settings.heatHighColor), shaped);
 }
 
