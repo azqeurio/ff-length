@@ -2043,45 +2043,48 @@ function renderExifHeatmap(result) {
     return;
   }
 
-  const table = document.createElement("table");
-  table.className = "heatmap-table";
-  const thead = document.createElement("thead");
-  const headRow = document.createElement("tr");
-  const firstHead = document.createElement("th");
-  firstHead.textContent = "Lens Name";
-  headRow.appendChild(firstHead);
-  columns.forEach(column => {
-    const th = document.createElement("th");
-    th.textContent = `${column}mm`;
-    headRow.appendChild(th);
-  });
-  thead.appendChild(headRow);
-  table.appendChild(thead);
-
-  const tbody = document.createElement("tbody");
   const maxCell = heatMaxForResult(result);
+  const overview = document.createElement("div");
+  overview.className = "heatmap-overview";
+  overview.style.setProperty("--heat-cols", columns.length);
+
+  const header = document.createElement("div");
+  header.className = "heatmap-overview-row heatmap-overview-head";
+  const firstHead = document.createElement("div");
+  firstHead.className = "heatmap-name-cell";
+  firstHead.textContent = "Lens";
+  header.appendChild(firstHead);
+  const labelStride = Math.max(1, Math.ceil(columns.length / 14));
+  columns.forEach((column, index) => {
+    const axisCell = document.createElement("div");
+    axisCell.className = "heatmap-axis-cell";
+    axisCell.textContent = (index === 0 || index === columns.length - 1 || index % labelStride === 0) ? `${column}` : "";
+    axisCell.title = `${column}mm`;
+    header.appendChild(axisCell);
+  });
+  overview.appendChild(header);
   lenses.forEach(lens => {
-    const row = document.createElement("tr");
-    const nameCell = document.createElement("td");
+    const row = document.createElement("div");
+    row.className = "heatmap-overview-row";
+    const nameCell = document.createElement("div");
+    nameCell.className = "heatmap-name-cell";
     nameCell.textContent = lens.lensName;
+    nameCell.title = lens.lensName;
     row.appendChild(nameCell);
     columns.forEach(column => {
       const count = lens.focalCounts?.[column] || 0;
-      const cell = document.createElement("td");
-      cell.className = count ? "heatmap-cell" : "heatmap-cell empty";
+      const cell = document.createElement("div");
+      cell.className = count ? "heatmap-mini-cell" : "heatmap-mini-cell empty";
       if (count) {
         const color = heatColor(count, maxCell);
         cell.style.background = color;
-        cell.style.color = contrastColor(color);
-        cell.textContent = formatCount(count);
         cell.title = `${lens.lensName} · ${column}mm · ${formatCount(count)} ${t("files")}`;
       }
       row.appendChild(cell);
     });
-    tbody.appendChild(row);
+    overview.appendChild(row);
   });
-  table.appendChild(tbody);
-  wrap.appendChild(table);
+  wrap.appendChild(overview);
 }
 
 function renderExifAnalysis() {
