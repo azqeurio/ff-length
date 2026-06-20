@@ -307,7 +307,6 @@ const uiFallbacks = {
     editExif: "\uD3B8\uC9D1",
     done: "\uC644\uB8CC",
     deleteSelected: "\uC120\uD0DD \uC0AD\uC81C",
-    language: "\uC5B8\uC5B4",
     bodyColors: "\uCE74\uBA54\uB77C\uBCC4 \uD788\uD2B8\uB9F5 \uC0C9",
     bodyColorsHint: "EXIF\uC5D0\uC11C \uAC10\uC9C0\uD55C \uCE74\uBA54\uB77C\uBCC4\uB85C \uB85C\uB4DC\uB9F5 \uD788\uD2B8\uB9F5 \uC0C9\uC744 \uC9C0\uC815\uD569\uB2C8\uB2E4. \uAC19\uC740 \uB80C\uC988\uB97C \uC5EC\uB7EC \uCE74\uBA54\uB77C\uB85C \uC4F4 \uACBD\uC6B0 \uC0C9\uC774 \uACB9\uCCD0 \uD45C\uC2DC\uB429\uB2C8\uB2E4.",
     bodyColumn: "\uCE74\uBA54\uB77C",
@@ -319,7 +318,6 @@ const uiFallbacks = {
     editExif: "Edit",
     done: "Done",
     deleteSelected: "Delete Selected",
-    language: "Language",
     bodyColors: "Camera Heatmap Colors",
     bodyColorsHint: "Choose roadmap heatmap colors for each camera detected from EXIF. If the same lens was used on multiple cameras, the colors are layered together.",
     bodyColumn: "Camera",
@@ -2472,8 +2470,6 @@ function applyLanguage() {
   document.documentElement.lang = currentLanguage;
   const langSelect = $("languageSelect");
   if (langSelect) langSelect.value = currentLanguage;
-  setText("#languageLabel", "language");
-
   setText(".brand h1", "appTitle");
   setAttr(".top-actions", "aria-label", currentLanguage === "en" ? "Image export tools" : "이미지 저장 도구");
   setText("#savePngBtn", "savePng");
