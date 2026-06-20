@@ -1,9 +1,15 @@
 importScripts("vendor/dexie.min.js", "vendor/exifr.full.umd.js");
 
-const DB_NAME = "lensRoadmapExifCacheV6";
+const DB_NAME = "lensRoadmapExifCacheV7";
 const BATCH_SIZE = 96;
 const UNKNOWN_LENS = "Unknown lens";
+const UNKNOWN_BODY = "Unknown body";
 const EXIF_PICK = [
+  "Make",
+  "Model",
+  "Camera",
+  "BodySerialNumber",
+  "SerialNumber",
   "LensModel",
   "Lens",
   "LensID",
@@ -36,7 +42,7 @@ let cancelled = false;
 
 const db = new Dexie(DB_NAME);
 db.version(1).stores({
-  photos: "&cacheKey,path,size,lastModified,lensName,focalLength,focalLength35mm,lensMin,lensMax,teleconverterFactor,teleconverterApplied,parsedAt"
+  photos: "&cacheKey,path,size,lastModified,lensName,bodyName,focalLength,focalLength35mm,lensMin,lensMax,teleconverterFactor,teleconverterApplied,parsedAt"
 });
 
 function roundFocal(value) {
@@ -115,6 +121,18 @@ function lensNameFrom(tags = {}) {
     if (text && text !== "0") return text;
   }
   return UNKNOWN_LENS;
+}
+
+function bodyNameFrom(tags = {}) {
+  const make = cleanExifText(textValue(tags.Make));
+  const model = cleanExifText(textValue(tags.Model) || textValue(tags.Camera));
+  if (!make && !model) return UNKNOWN_BODY;
+  if (!make) return model;
+  if (!model) return make;
+  const makeKey = make.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const modelKey = model.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  if (modelKey.startsWith(makeKey)) return model;
+  return `${make} ${model}`.replace(/\s+/g, " ").trim();
 }
 
 function fileExtensionFromName(name) {
@@ -423,6 +441,7 @@ async function parsePhoto(entry) {
     size: entry?.size ?? file.size,
     lastModified: entry?.lastModified ?? file.lastModified,
     lensName: UNKNOWN_LENS,
+    bodyName: UNKNOWN_BODY,
     focalLength: null,
     focalLength35mm: null,
     lensMin: null,
@@ -458,6 +477,7 @@ async function parsePhoto(entry) {
     const lensName = olympusRaw?.lensName && (!exifLensName || exifLensName === UNKNOWN_LENS || /^Lens ID/i.test(exifLensName))
       ? olympusRaw.lensName
       : exifLensName;
+    const bodyName = bodyNameFrom(tags);
     const olympusRange = olympusRaw?.lensMin && olympusRaw?.lensMax
       ? { start: olympusRaw.lensMin, end: olympusRaw.lensMax }
       : null;
@@ -480,6 +500,7 @@ async function parsePhoto(entry) {
     return {
       ...base,
       lensName,
+      bodyName,
       focalLength,
       focalLength35mm,
       lensMin: adjustedRange ? roundFocal(adjustedRange.start) : null,
@@ -504,6 +525,8 @@ function addToGroup(groups, record) {
       total: 0,
       withFocal: 0,
       withFocal35mm: 0,
+      bodyCounts: new Map(),
+      bodyFocalCounts: new Map(),
       focalCounts: new Map(),
       equivCounts: new Map(),
       focalMin: null,
@@ -521,6 +544,8 @@ function addToGroup(groups, record) {
 
   const group = groups.get(lensName);
   group.total += 1;
+  const bodyName = record.bodyName || UNKNOWN_BODY;
+  group.bodyCounts.set(bodyName, (group.bodyCounts.get(bodyName) || 0) + 1);
   group.teleconverterFactor = Math.max(group.teleconverterFactor || 1, record.teleconverterFactor || 1);
   group.teleconverterApplied = group.teleconverterApplied || !!record.teleconverterApplied;
 
@@ -528,6 +553,9 @@ function addToGroup(groups, record) {
     const key = formatFocal(record.focalLength);
     group.withFocal += 1;
     group.focalCounts.set(key, (group.focalCounts.get(key) || 0) + 1);
+    if (!group.bodyFocalCounts.has(bodyName)) group.bodyFocalCounts.set(bodyName, new Map());
+    const bodyMap = group.bodyFocalCounts.get(bodyName);
+    bodyMap.set(key, (bodyMap.get(key) || 0) + 1);
     group.focalMin = group.focalMin === null ? record.focalLength : Math.min(group.focalMin, record.focalLength);
     group.focalMax = group.focalMax === null ? record.focalLength : Math.max(group.focalMax, record.focalLength);
   }
@@ -563,11 +591,20 @@ function topFocals(map, limit = 5) {
 function serializeGroups(groups) {
   let maxCellCount = 0;
   const focalColumns = new Set();
+  const bodies = new Set();
 
   const lenses = [...groups.values()]
     .map(group => {
       const focalCounts = Object.fromEntries([...group.focalCounts.entries()].sort((a, b) => Number(a[0]) - Number(b[0])));
       const equivCounts = Object.fromEntries([...group.equivCounts.entries()].sort((a, b) => Number(a[0]) - Number(b[0])));
+      const bodyCounts = Object.fromEntries([...group.bodyCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])));
+      const bodyFocalCounts = Object.fromEntries([...group.bodyFocalCounts.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([bodyName, focalMap]) => {
+          bodies.add(bodyName);
+          return [bodyName, Object.fromEntries([...focalMap.entries()].sort((a, b) => Number(a[0]) - Number(b[0])))];
+        }));
+      Object.keys(bodyCounts).forEach(bodyName => bodies.add(bodyName));
       Object.entries(focalCounts).forEach(([focal, count]) => {
         focalColumns.add(focal);
         maxCellCount = Math.max(maxCellCount, count);
@@ -587,6 +624,8 @@ function serializeGroups(groups) {
         equivMin: group.equivMin,
         equivMax: group.equivMax,
         cropEstimate: group.cropCount ? Math.round((group.cropSum / group.cropCount) * 10) / 10 : null,
+        bodyCounts,
+        bodyFocalCounts,
         focalCounts,
         equivCounts,
         topFocals: topFocals(group.focalCounts)
@@ -597,7 +636,8 @@ function serializeGroups(groups) {
   return {
     lenses,
     focalColumns: [...focalColumns].sort((a, b) => Number(a) - Number(b)),
-    maxCellCount
+    maxCellCount,
+    bodies: [...bodies].filter(Boolean).sort((a, b) => a.localeCompare(b))
   };
 }
 

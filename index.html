@@ -326,6 +326,11 @@
                 </div>
                 <span id="exifIgnoredText" class="muted-pill">동일 파일은 JPG 우선</span>
               </div>
+              <div class="button-row exif-edit-toolbar">
+                <button id="editExifLensesBtn" class="btn btn-soft" type="button">편집</button>
+                <button id="deleteSelectedExifBtn" class="btn btn-danger" type="button" hidden>선택 삭제</button>
+              </div>
+              <div id="bodyColorPanel" class="body-color-panel" hidden></div>
               <div class="table-wrap exif-table-wrap"><table>
                 <thead><tr><th>렌즈</th><th>사진 수</th><th>초점거리 범위</th><th>35mm 환산 범위</th><th>많이 쓴 초점거리</th></tr></thead>
                 <tbody id="exifLensTable"></tbody>

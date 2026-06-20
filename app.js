@@ -302,8 +302,33 @@ const i18n = {
   }
 };
 
+const uiFallbacks = {
+  ko: {
+    editExif: "\uD3B8\uC9D1",
+    done: "\uC644\uB8CC",
+    deleteSelected: "\uC120\uD0DD \uC0AD\uC81C",
+    bodyColors: "\uBC14\uB514\uBCC4 \uD788\uD2B8\uB9F5 \uC0C9",
+    bodyColorsHint: "EXIF\uC5D0\uC11C \uAC10\uC9C0\uD55C \uCE74\uBA54\uB77C \uBC14\uB514\uBCC4\uB85C \uB85C\uB4DC\uB9F5 \uD788\uD2B8\uB9F5 \uC0C9\uC744 \uC9C0\uC815\uD569\uB2C8\uB2E4. \uAC19\uC740 \uB80C\uC988\uB97C \uC5EC\uB7EC \uBC14\uB514\uB85C \uC4F4 \uACBD\uC6B0 \uC0C9\uC774 \uACB9\uCCD0 \uD45C\uC2DC\uB429\uB2C8\uB2E4.",
+    bodyColumn: "\uBC14\uB514",
+    selectColumn: "\uC120\uD0DD",
+    delete: "\uC0AD\uC81C",
+    selectedCount: "{count}\uAC1C \uC120\uD0DD\uB428"
+  },
+  en: {
+    editExif: "Edit",
+    done: "Done",
+    deleteSelected: "Delete Selected",
+    bodyColors: "Body Heatmap Colors",
+    bodyColorsHint: "Choose roadmap heatmap colors for each camera body detected from EXIF. If the same lens was used on multiple bodies, the colors are layered together.",
+    bodyColumn: "Body",
+    selectColumn: "Select",
+    delete: "Delete",
+    selectedCount: "{count} selected"
+  }
+};
+
 function t(key, vars = {}) {
-  const text = i18n[currentLanguage]?.[key] ?? i18n.ko[key] ?? key;
+  const text = i18n[currentLanguage]?.[key] ?? i18n.ko[key] ?? uiFallbacks[currentLanguage]?.[key] ?? uiFallbacks.ko[key] ?? key;
   return String(text).replace(/\{(\w+)\}/g, (_, name) => vars[name] ?? "");
 }
 
@@ -363,6 +388,7 @@ const defaultChartSettings = {
 };
 let visualSettings = loadVisualSettings();
 const rawExtensions = new Set(["orf", "raw", "rw2", "arw", "cr2", "cr3", "nef", "dng"]);
+const bodyColorPalette = ["#DC2626", "#2563EB", "#16A34A", "#C026D3", "#EA580C", "#0891B2", "#7C3AED", "#475569"];
 const exifAnalysis = {
   worker: null,
   running: false,
@@ -372,6 +398,8 @@ const exifAnalysis = {
   result: loadStoredExifResult(),
   status: t("privacy")
 };
+let exifEditMode = false;
+const selectedExifLensKeys = new Set();
 
 function clone(obj) { return JSON.parse(JSON.stringify(obj)); }
 
@@ -514,25 +542,72 @@ function applyChartSettingsToDom(settings = loadChartSettings()) {
 }
 
 function emptyExifResult() {
-  return { lenses: [], focalColumns: [], maxCellCount: 0 };
+  return { lenses: [], focalColumns: [], maxCellCount: 0, bodies: [], bodyColors: {} };
+}
+
+function bodyNamesForResult(result = exifAnalysis.result) {
+  const names = new Set(Array.isArray(result?.bodies) ? result.bodies : []);
+  (result?.lenses || []).forEach(lens => {
+    Object.keys(lens.bodyCounts || {}).forEach(name => names.add(name));
+    Object.keys(lens.bodyFocalCounts || {}).forEach(name => names.add(name));
+  });
+  return [...names].filter(Boolean).sort((a, b) => a.localeCompare(b));
+}
+
+function ensureBodyColors(result = exifAnalysis.result) {
+  if (!result) return {};
+  result.bodyColors = result.bodyColors && typeof result.bodyColors === "object" ? result.bodyColors : {};
+  bodyNamesForResult(result).forEach((name, index) => {
+    result.bodyColors[name] = normalizeHexColor(result.bodyColors[name], bodyColorPalette[index % bodyColorPalette.length]);
+  });
+  return result.bodyColors;
+}
+
+function bodyColorForName(name, index = 0, result = exifAnalysis.result) {
+  ensureBodyColors(result);
+  return normalizeHexColor(result?.bodyColors?.[name], bodyColorPalette[index % bodyColorPalette.length]);
+}
+
+function recalculateExifResult(result = emptyExifResult()) {
+  const normalized = {
+    lenses: Array.isArray(result?.lenses) ? result.lenses : [],
+    focalColumns: [],
+    maxCellCount: 0,
+    bodies: [],
+    bodyColors: result?.bodyColors && typeof result.bodyColors === "object" ? result.bodyColors : {}
+  };
+  const focalColumns = new Set();
+  const bodies = new Set(Array.isArray(result?.bodies) ? result.bodies : []);
+  normalized.lenses.forEach(lens => {
+    Object.entries(lens.focalCounts || {}).forEach(([focal, count]) => {
+      focalColumns.add(focal);
+      normalized.maxCellCount = Math.max(normalized.maxCellCount, Number(count) || 0);
+    });
+    Object.entries(lens.bodyFocalCounts || {}).forEach(([bodyName, counts]) => {
+      bodies.add(bodyName);
+      Object.entries(counts || {}).forEach(([focal, count]) => {
+        focalColumns.add(focal);
+        normalized.maxCellCount = Math.max(normalized.maxCellCount, Number(count) || 0);
+      });
+    });
+    Object.keys(lens.bodyCounts || {}).forEach(bodyName => bodies.add(bodyName));
+  });
+  normalized.focalColumns = [...focalColumns].sort((a, b) => Number(a) - Number(b));
+  normalized.bodies = [...bodies].filter(Boolean).sort((a, b) => a.localeCompare(b));
+  ensureBodyColors(normalized);
+  return normalized;
 }
 
 function loadStoredExifResult() {
   try {
     const saved = JSON.parse(localStorage.getItem("lensRoadmapExifResultV1"));
-    if (Array.isArray(saved?.lenses) && Array.isArray(saved?.focalColumns)) {
-      return {
-        lenses: saved.lenses,
-        focalColumns: saved.focalColumns,
-        maxCellCount: Number(saved.maxCellCount) || 0
-      };
-    }
+    if (Array.isArray(saved?.lenses)) return recalculateExifResult(saved);
   } catch {}
   return emptyExifResult();
 }
 
 function saveStoredExifResult(result) {
-  localStorage.setItem("lensRoadmapExifResultV1", JSON.stringify(result || emptyExifResult()));
+  localStorage.setItem("lensRoadmapExifResultV1", JSON.stringify(recalculateExifResult(result || emptyExifResult())));
 }
 
 function normalizeHexColor(value, fallback = "#000000") {
@@ -1033,8 +1108,9 @@ function heatValueForLensStats(stats) {
 function heatRatio(count, max, minVisible = 0) {
   const value = Number(count) || 0;
   if (value <= 0) return 0;
-  const baseRatio = clamp(value / Math.max(1, Number(max) || 1), 0, 1);
-  const emphasized = Math.pow(baseRatio, .58);
+  const maxValue = Math.max(1, Number(max) || 1);
+  const baseRatio = clamp(Math.log1p(value) / Math.log1p(maxValue), 0, 1);
+  const emphasized = Math.pow(baseRatio, .42);
   return Math.max(emphasized, minVisible);
 }
 
@@ -1043,12 +1119,12 @@ function heatColor(count, max, minVisible = 0) {
   return mixColor(settings.heatLowColor, settings.heatHighColor, heatRatio(count, max, minVisible));
 }
 
-function smoothHeatColor(ratio) {
+function smoothHeatColor(ratio, highColor = currentVisualSettings().heatHighColor) {
   const settings = currentVisualSettings();
-  const cutoff = .018;
+  const cutoff = .004;
   if (!Number.isFinite(ratio) || ratio <= cutoff) return settings.heatLowColor;
-  const shaped = Math.pow(clamp((ratio - cutoff) / (1 - cutoff), 0, 1), .62);
-  return mixColor(settings.heatLowColor, settings.heatHighColor, shaped);
+  const shaped = Math.pow(clamp((ratio - cutoff) / (1 - cutoff), 0, 1), .38);
+  return mixColor(settings.heatLowColor, normalizeHexColor(highColor, settings.heatHighColor), shaped);
 }
 
 function activeTeleconverters() {
@@ -1059,8 +1135,8 @@ function activeTeleconverters() {
   };
 }
 
-function rawFocalEntries(stats) {
-  return Object.entries(stats?.focalCounts || {})
+function rawFocalEntries(stats, focalCounts = stats?.focalCounts) {
+  return Object.entries(focalCounts || {})
     .map(([focal, count]) => ({ focal: Number(focal), count: Number(count) || 0 }))
     .filter(item => Number.isFinite(item.focal) && item.focal > 0 && item.count > 0);
 }
@@ -1086,10 +1162,10 @@ function scoreFocalEntries(entries, start, end) {
   return { ratio: inside / total, inside };
 }
 
-function focalEntriesForLens(lens, stats) {
+function focalEntriesForLens(lens, stats, focalCounts = stats?.focalCounts) {
   const start = Number(lens.start);
   const end = Number(lens.end);
-  const rawEntries = rawFocalEntries(stats);
+  const rawEntries = rawFocalEntries(stats, focalCounts);
   if (!rawEntries.length) return [];
 
   const factor = teleconverterFactorForStats(stats);
@@ -1126,6 +1202,35 @@ function focalEntriesForLens(lens, stats) {
   return best.entries
     .filter(item => Number.isFinite(item.focal) && item.count > 0 && item.focal >= start - .5 && item.focal <= end + .5)
     .sort((a, b) => a.focal - b.focal);
+}
+
+function bodyHeatLayersForLens(lens, stats) {
+  const bodyMaps = stats?.bodyFocalCounts && typeof stats.bodyFocalCounts === "object" ? stats.bodyFocalCounts : {};
+  const names = Object.keys(bodyMaps).filter(name => rawFocalEntries(stats, bodyMaps[name]).length > 0);
+  if (!names.length) {
+    const entries = focalEntriesForLens(lens, stats);
+    return entries.length ? [{ bodyName: "", color: currentVisualSettings().heatHighColor, entries }] : [];
+  }
+  return names
+    .sort((a, b) => {
+      const aTotal = Object.values(bodyMaps[a] || {}).reduce((sum, count) => sum + (Number(count) || 0), 0);
+      const bTotal = Object.values(bodyMaps[b] || {}).reduce((sum, count) => sum + (Number(count) || 0), 0);
+      return bTotal - aTotal || a.localeCompare(b);
+    })
+    .map((bodyName, index) => ({
+      bodyName,
+      color: bodyColorForName(bodyName, index),
+      entries: focalEntriesForLens(lens, stats, bodyMaps[bodyName])
+    }))
+    .filter(layer => layer.entries.length);
+}
+
+function dominantBodyColorForStats(stats) {
+  const entries = Object.entries(stats?.bodyCounts || {})
+    .map(([name, count]) => ({ name, count: Number(count) || 0 }))
+    .filter(item => item.name && item.count > 0)
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  return entries.length ? bodyColorForName(entries[0].name) : currentVisualSettings().heatHighColor;
 }
 
 function ensureExifRoadmapStyle() {
@@ -1386,7 +1491,9 @@ function renderChart() {
         const anchor = labelFitsRight ? "start" : "end";
         const maskX = anchor === "start" ? labelX - 3 : labelX - labelW - 3;
         const redraw = () => {
-          const primeColor = exifStats ? heatColor(heatValueForLensStats(exifStats), heatMaxForResult(), .04) : color;
+          const primeColor = exifStats
+            ? mixColor(currentVisualSettings().heatLowColor, dominantBodyColorForStats(exifStats), heatRatio(heatValueForLensStats(exifStats), heatMaxForResult(), .04))
+            : color;
           makeEl(svg, "circle", { cx: startX, cy, r: exifStats ? 5.7 : 4.5, fill: primeColor, stroke: exifStats ? visual.chartLineColor : "", "stroke-width": exifStats ? 1.15 : "" });
           makeEl(svg, "rect", { x: maskX, y: cy - 9, width: labelW + 6, height: 15, fill: visual.plotBackgroundColor });
           makeText(svg, { x: labelX, y: cy + 4, "font-size": 10.8, "font-weight": 850, "text-anchor": anchor, fill: visual.chartTextColor }, label);
@@ -1505,8 +1612,8 @@ function drawZoomFallbackHeatLine(svg, item, stats, heatMax) {
 }
 
 function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatMax) {
-  const entries = focalEntriesForLens(item.lens, stats);
-  if (!entries.length) return false;
+  const layers = bodyHeatLayersForLens(item.lens, stats);
+  if (!layers.length) return false;
 
   const visual = currentVisualSettings();
   const lineStart = Math.min(item.startX, item.endX);
@@ -1526,14 +1633,6 @@ function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatM
   const innerH = Math.max(1, barH - inset * 2);
   if (innerW <= 1 || innerH <= 1) return false;
 
-  const pxEntries = entries
-    .map(entry => {
-      const px = clamp(leftChart + x(displayValue(item.lens, entry.focal)), innerStart, innerEnd);
-      return { ...entry, px };
-    })
-    .sort((a, b) => a.px - b.px);
-  if (!pxEntries.length) return false;
-
   makeEl(svg, "rect", {
     x: lineStart,
     y: outerY,
@@ -1547,41 +1646,54 @@ function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatM
   const clipPath = makeEl(defs, "clipPath", { id: clipId });
   makeEl(clipPath, "rect", { x: innerStart, y: innerY, width: innerW, height: innerH });
 
-  const heatLayer = makeEl(svg, "g", { "clip-path": `url(#${clipId})` });
-  const heatSpots = pxEntries.map((entry, index) => {
-    const prevGap = index > 0 ? entry.px - pxEntries[index - 1].px : Infinity;
-    const nextGap = index < pxEntries.length - 1 ? pxEntries[index + 1].px - entry.px : Infinity;
-    const nearestGap = Math.min(prevGap, nextGap);
-    const sigma = Number.isFinite(nearestGap)
-      ? clamp(nearestGap * .45, 4.5, 9.5)
-      : clamp(innerW * .026, 6, 12);
-    return {
-      px: entry.px,
-      ratio: clamp(entry.count / maxCount, 0, 1),
-      sigma
-    };
-  });
-  const segments = Math.max(90, Math.min(640, Math.ceil(innerW)));
-  const segmentW = innerW / segments;
+  const drawLayer = (entries, highColor, opacity) => {
+    const pxEntries = entries
+      .map(entry => {
+        const px = clamp(leftChart + x(displayValue(item.lens, entry.focal)), innerStart, innerEnd);
+        return { ...entry, px };
+      })
+      .sort((a, b) => a.px - b.px);
+    if (!pxEntries.length) return;
 
-  for (let index = 0; index < segments; index += 1) {
-    const stripX = innerStart + segmentW * index;
-    const sampleX = stripX + segmentW / 2;
-    const ratio = clamp(heatSpots.reduce((sum, spot) => {
-      const distance = sampleX - spot.px;
-      const weight = Math.exp(-0.5 * (distance / spot.sigma) ** 2);
-      return sum + spot.ratio * weight;
-    }, 0), 0, 1);
-    const color = smoothHeatColor(ratio);
-    if (color === visual.heatLowColor) continue;
-    makeEl(heatLayer, "rect", {
-      x: stripX,
-      y: innerY,
-      width: segmentW + .35,
-      height: innerH,
-      fill: color
+    const heatLayer = makeEl(svg, "g", { "clip-path": `url(#${clipId})`, opacity });
+    const heatSpots = pxEntries.map((entry, index) => {
+      const prevGap = index > 0 ? entry.px - pxEntries[index - 1].px : Infinity;
+      const nextGap = index < pxEntries.length - 1 ? pxEntries[index + 1].px - entry.px : Infinity;
+      const nearestGap = Math.min(prevGap, nextGap);
+      const sigma = Number.isFinite(nearestGap)
+        ? clamp(nearestGap * .58, 5.5, 16)
+        : clamp(innerW * .034, 8, 22);
+      return {
+        px: entry.px,
+        ratio: heatRatio(entry.count, maxCount),
+        sigma
+      };
     });
-  }
+    const segments = Math.max(120, Math.min(760, Math.ceil(innerW * 1.25)));
+    const segmentW = innerW / segments;
+
+    for (let index = 0; index < segments; index += 1) {
+      const stripX = innerStart + segmentW * index;
+      const sampleX = stripX + segmentW / 2;
+      const ratio = clamp(heatSpots.reduce((sum, spot) => {
+        const distance = sampleX - spot.px;
+        const weight = Math.exp(-0.5 * (distance / spot.sigma) ** 2);
+        return sum + spot.ratio * weight;
+      }, 0), 0, 1);
+      const color = smoothHeatColor(ratio, highColor);
+      if (color === visual.heatLowColor) continue;
+      makeEl(heatLayer, "rect", {
+        x: stripX,
+        y: innerY,
+        width: segmentW + .25,
+        height: innerH,
+        fill: color
+      });
+    }
+  };
+
+  const layerOpacity = layers.length > 1 ? .72 : 1;
+  layers.forEach(layer => drawLayer(layer.entries, layer.color, layerOpacity));
 
   makeEl(svg, "rect", {
     x: lineStart,
@@ -1771,18 +1883,125 @@ function renderTopFocals(topFocals) {
   return wrap;
 }
 
+function exifLensKey(lens) {
+  return String(lens?.lensName || "").trim().toLowerCase();
+}
+
+function removeExifLenses(keys) {
+  const keySet = new Set(keys);
+  if (!keySet.size) return;
+  const hadExifRoadmap = state.lenses.length > 0 && state.lenses.every(lens => lens.styleId === "exif-imported");
+  exifAnalysis.result = recalculateExifResult({
+    ...exifAnalysis.result,
+    lenses: (exifAnalysis.result?.lenses || []).filter(lens => !keySet.has(exifLensKey(lens)))
+  });
+  selectedExifLensKeys.clear();
+  saveStoredExifResult(exifAnalysis.result);
+  if (roadmapExifEnabled()) {
+    applyExifStatsToRoadmap({ silent: true, render: false });
+  } else if (hadExifRoadmap) {
+    state.lenses = [];
+    saveState();
+  }
+  renderAll();
+}
+
+function renderExifEditControls() {
+  const editBtn = $("editExifLensesBtn");
+  const deleteBtn = $("deleteSelectedExifBtn");
+  if (editBtn) editBtn.textContent = exifEditMode ? t("done") : t("editExif");
+  if (deleteBtn) {
+    deleteBtn.hidden = !exifEditMode;
+    deleteBtn.disabled = !selectedExifLensKeys.size;
+    deleteBtn.textContent = selectedExifLensKeys.size
+      ? `${t("deleteSelected")} · ${t("selectedCount", { count: formatCount(selectedExifLensKeys.size) })}`
+      : t("deleteSelected");
+  }
+}
+
+function renderBodyColorControls(result = exifAnalysis.result) {
+  const wrap = $("bodyColorPanel");
+  if (!wrap) return;
+  const bodies = bodyNamesForResult(result);
+  wrap.innerHTML = "";
+  wrap.hidden = !bodies.length;
+  if (!bodies.length) return;
+  ensureBodyColors(result);
+
+  const head = document.createElement("div");
+  head.className = "body-color-head";
+  const title = document.createElement("strong");
+  title.textContent = t("bodyColors");
+  const hint = document.createElement("span");
+  hint.textContent = t("bodyColorsHint");
+  head.append(title, hint);
+  wrap.appendChild(head);
+
+  const grid = document.createElement("div");
+  grid.className = "body-color-grid";
+  bodies.forEach((bodyName, index) => {
+    const label = document.createElement("label");
+    label.className = "body-color-item";
+    const color = document.createElement("input");
+    color.type = "color";
+    color.value = bodyColorForName(bodyName, index, result);
+    color.addEventListener("input", () => {
+      result.bodyColors[bodyName] = normalizeHexColor(color.value, bodyColorPalette[index % bodyColorPalette.length]);
+      saveStoredExifResult(result);
+      renderChart();
+      renderExifHeatmap(result);
+    });
+    const text = document.createElement("span");
+    text.textContent = bodyName;
+    label.append(color, text);
+    grid.appendChild(label);
+  });
+  wrap.appendChild(grid);
+}
+
 function renderExifLensTable(lenses) {
   const body = $("exifLensTable");
   if (!body) return;
   body.innerHTML = "";
+  const headRow = body.closest("table")?.querySelector("thead tr");
+  if (headRow) {
+    headRow.innerHTML = "";
+    const headers = exifEditMode
+      ? [t("selectColumn"), t("lensName"), t("photoCount"), t("focalRange"), t("equivRange"), t("bodyColumn"), t("topFocals"), ""]
+      : [t("lensName"), t("photoCount"), t("focalRange"), t("equivRange"), t("bodyColumn"), t("topFocals")];
+    headers.forEach(text => {
+      const th = document.createElement("th");
+      th.textContent = text;
+      headRow.appendChild(th);
+    });
+  }
   if (!lenses.length) {
-    emptyRow(body, 5, t("noExifRows"));
+    emptyRow(body, exifEditMode ? 8 : 6, t("noExifRows"));
     return;
   }
 
   lenses.forEach(lens => {
     const row = document.createElement("tr");
-    [lens.lensName, formatCount(lens.total), rangeLabel(lens.focalMin, lens.focalMax), rangeLabel(lens.equivMin, lens.equivMax)].forEach(text => {
+    const key = exifLensKey(lens);
+    if (exifEditMode) {
+      const selectCell = document.createElement("td");
+      selectCell.className = "exif-select-cell";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = selectedExifLensKeys.has(key);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) selectedExifLensKeys.add(key);
+        else selectedExifLensKeys.delete(key);
+        renderExifEditControls();
+      });
+      selectCell.appendChild(checkbox);
+      row.appendChild(selectCell);
+    }
+    const bodyText = Object.entries(lens.bodyCounts || {})
+      .sort((a, b) => Number(b[1]) - Number(a[1]) || a[0].localeCompare(b[0]))
+      .map(([name, count]) => `${name} ${formatCount(count)}`)
+      .join(" · ") || "-";
+    [lens.lensName, formatCount(lens.total), rangeLabel(lens.focalMin, lens.focalMax), rangeLabel(lens.equivMin, lens.equivMax), bodyText].forEach(text => {
       const cell = document.createElement("td");
       cell.textContent = text;
       row.appendChild(cell);
@@ -1790,8 +2009,19 @@ function renderExifLensTable(lenses) {
     const topCell = document.createElement("td");
     topCell.appendChild(renderTopFocals(lens.topFocals));
     row.appendChild(topCell);
+    if (exifEditMode) {
+      const actionCell = document.createElement("td");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "small-btn danger";
+      btn.textContent = t("delete");
+      btn.addEventListener("click", () => removeExifLenses([key]));
+      actionCell.appendChild(btn);
+      row.appendChild(actionCell);
+    }
     body.appendChild(row);
   });
+  renderExifEditControls();
 }
 
 function renderExifHeatmap(result) {
@@ -1857,7 +2087,8 @@ function renderExifHeatmap(result) {
 function renderExifAnalysis() {
   const scan = exifAnalysis.scan;
   const summary = exifAnalysis.summary;
-  const result = exifAnalysis.result || { lenses: [], focalColumns: [], maxCellCount: 0 };
+  const result = recalculateExifResult(exifAnalysis.result || emptyExifResult());
+  exifAnalysis.result = result;
 
   setProgress("photoScanProgressBar", "photoScanProgressText", scan.scanned, scan.total, scan.total ? `${formatCount(scan.scanned)} / ${formatCount(scan.total)} · JPG ${formatCount(scan.jpegs)} · RAW ${formatCount(scan.raws)}` : t("idle"));
   setProgress("photoExifProgressBar", "photoExifProgressText", summary.processed, summary.total, summary.total ? `${formatCount(summary.processed)} / ${formatCount(summary.total)}` : t("idle"));
@@ -1885,6 +2116,8 @@ function renderExifAnalysis() {
   if (ignored) ignored.textContent = t("duplicateIgnored", { raw: formatCount(scan.rawIgnored), other: formatCount(scan.otherIgnored), errors: formatCount(summary.errors) });
 
   renderExifLensTable(result.lenses || []);
+  renderBodyColorControls(result);
+  renderExifEditControls();
   renderExifHeatmap(result);
 }
 
@@ -1894,8 +2127,10 @@ async function analyzePhotoFolder(fileList) {
 
   exifAnalysis.running = true;
   exifAnalysis.cancelRequested = false;
+  exifEditMode = false;
+  selectedExifLensKeys.clear();
   exifAnalysis.scan = { total: fileList.length, scanned: 0, jpegs: 0, raws: 0, rawIgnored: 0, otherIgnored: 0 };
-  exifAnalysis.result = { lenses: [], focalColumns: [], maxCellCount: 0 };
+  exifAnalysis.result = emptyExifResult();
   resetExifSummary(0);
   exifAnalysis.status = t("scanStatus");
   switchTab("Exif");
@@ -1979,7 +2214,7 @@ function startExifWorker(files) {
 
     if (message.type === "done") {
       exifAnalysis.summary = message.summary;
-      exifAnalysis.result = message.result || { lenses: [], focalColumns: [], maxCellCount: 0 };
+      exifAnalysis.result = recalculateExifResult(message.result || emptyExifResult());
       saveStoredExifResult(exifAnalysis.result);
       exifAnalysis.running = false;
       exifAnalysis.worker = null;
@@ -2050,7 +2285,7 @@ function clearExifCache() {
   }
   if (!confirm(t("clearCacheConfirm"))) return;
 
-  const dbNames = ["lensRoadmapExifCacheV6", "lensRoadmapExifCacheV5", "lensRoadmapExifCacheV4", "lensRoadmapExifCacheV3", "lensRoadmapExifCacheV2", "lensRoadmapExifCacheV1"];
+  const dbNames = ["lensRoadmapExifCacheV7", "lensRoadmapExifCacheV6", "lensRoadmapExifCacheV5", "lensRoadmapExifCacheV4", "lensRoadmapExifCacheV3", "lensRoadmapExifCacheV2", "lensRoadmapExifCacheV1"];
   let done = 0;
   let failed = false;
   const finish = () => {
@@ -2252,6 +2487,8 @@ function applyLanguage() {
   setText("#applyExifRoadmapBtn", "applyExif");
   setText("#cancelExifScanBtn", "cancelAnalysis");
   setText("#clearExifCacheBtn", "clearExifCache");
+  renderExifEditControls();
+  renderBodyColorControls(exifAnalysis.result);
   const folderLabel = $("photoFolderInput")?.parentElement;
   if (folderLabel) folderLabel.childNodes[0].textContent = t("folderPick");
   const mobileLabel = $("photoFilesInput")?.parentElement;
@@ -2941,6 +3178,12 @@ function bind() {
   $("applyExifRoadmapBtn").addEventListener("click", () => applyExifStatsToRoadmap());
   $("cancelExifScanBtn").addEventListener("click", () => cancelExifAnalysis());
   $("clearExifCacheBtn").addEventListener("click", clearExifCache);
+  $("editExifLensesBtn")?.addEventListener("click", () => {
+    exifEditMode = !exifEditMode;
+    if (!exifEditMode) selectedExifLensKeys.clear();
+    renderExifAnalysis();
+  });
+  $("deleteSelectedExifBtn")?.addEventListener("click", () => removeExifLenses([...selectedExifLensKeys]));
 
   $("lensName").addEventListener("input", () => {
     applyParsedFocal(false);

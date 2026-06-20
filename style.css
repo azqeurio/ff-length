@@ -742,6 +742,81 @@ input[type="color"] {
   padding: 0;
 }
 
+.exif-edit-toolbar {
+  justify-content: flex-start;
+  margin-top: -4px;
+}
+
+.exif-select-cell {
+  width: 48px;
+  text-align: center;
+}
+
+.exif-select-cell input {
+  width: 18px;
+  min-height: 18px;
+  accent-color: var(--blue);
+}
+
+.body-color-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-soft);
+}
+
+.body-color-head {
+  display: grid;
+  gap: 3px;
+}
+
+.body-color-head strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.body-color-head span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.body-color-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+}
+
+.body-color-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.body-color-item input {
+  width: 34px;
+  height: 30px;
+  min-height: 30px;
+  padding: 2px;
+  flex: 0 0 auto;
+}
+
+.body-color-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .heatmap-wrap {
   max-height: 430px;
   overflow: auto;
@@ -970,8 +1045,14 @@ tr:last-child td { border-bottom: 0; }
   .example-box,
   .tc-box,
   .lens-preview,
+  .body-color-panel,
   .toggle-row {
     background: #0f172a;
+    border-color: var(--line);
+  }
+
+  .body-color-item {
+    background: #111827;
     border-color: var(--line);
   }
 
