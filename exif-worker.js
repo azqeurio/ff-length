@@ -1,6 +1,6 @@
-importScripts("vendor/dexie.min.js", "vendor/exifr.full.umd.js");
+importScripts("vendor/dexie.min.js", "vendor/exifr.full.umd.js", "burst-group.js");
 
-const DB_NAME = "lensRoadmapExifCacheV7";
+const DB_NAME = "lensRoadmapExifCacheV8";
 const BATCH_SIZE = 96;
 const UNKNOWN_LENS = "Unknown lens";
 const UNKNOWN_BODY = "Unknown body";
@@ -26,7 +26,14 @@ const EXIF_PICK = [
   "FocalLength35efl",
   "FocalLength35mm",
   "FocalLenIn35mmFilm",
-  "DigitalZoomRatio"
+  "DigitalZoomRatio",
+  "DateTimeOriginal",
+  "CreateDate",
+  "ModifyDate",
+  "SubSecTimeOriginal",
+  "SubSecTime",
+  "SubSecTimeDigitized",
+  "OffsetTimeOriginal"
 ];
 const OLYMPUS_LENS_TYPES = {
   "0 35 10": "Olympus M.Zuiko 100-400mm F5.0-6.3"
@@ -42,7 +49,7 @@ let cancelled = false;
 
 const db = new Dexie(DB_NAME);
 db.version(1).stores({
-  photos: "&cacheKey,path,size,lastModified,lensName,bodyName,focalLength,focalLength35mm,lensMin,lensMax,teleconverterFactor,teleconverterApplied,parsedAt"
+  photos: "&cacheKey,path,size,lastModified,lensName,bodyName,focalLength,focalLength35mm,lensMin,lensMax,teleconverterFactor,teleconverterApplied,timestampMs,parsedAt"
 });
 
 function roundFocal(value) {
@@ -112,6 +119,68 @@ function cleanExifText(text) {
     .replace(/\0/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function subSecToMs(value) {
+  if (value === null || value === undefined) return 0;
+  if (value instanceof Date) return value.getMilliseconds();
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (value >= 1000) return 0;
+    const digits = String(Math.trunc(Math.abs(value)));
+    return Number((digits + "000").slice(0, 3)) || 0;
+  }
+  const digits = String(value).replace(/[^0-9]/g, "");
+  if (!digits) return 0;
+  return Number((digits + "000").slice(0, 3)) || 0;
+}
+
+function exifDateToMs(value) {
+  if (value === null || value === undefined || value === "") return null;
+  if (value instanceof Date) {
+    const time = value.getTime();
+    return Number.isFinite(time) && time > 0 ? time : null;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (value > 1e12) return Math.trunc(value);
+    if (value > 1e9) return Math.trunc(value * 1000);
+    return null;
+  }
+  if (typeof value === "object") {
+    if (value.value) return exifDateToMs(value.value);
+    if (value.description) return exifDateToMs(value.description);
+    return null;
+  }
+  const text = String(value).trim();
+  const match = text.match(/(\d{4})[:/-](\d{1,2})[:/-](\d{1,2})[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,6}))?)?/);
+  if (!match) {
+    const fallback = Date.parse(text);
+    return Number.isFinite(fallback) && fallback > 0 ? fallback : null;
+  }
+  const [, year, month, day, hour, minute, second = "0", fraction = ""] = match;
+  const base = new Date(
+    Number(year), Number(month) - 1, Number(day),
+    Number(hour), Number(minute), Number(second)
+  ).getTime();
+  if (!Number.isFinite(base) || base <= 0) return null;
+  if (fraction) return base + subSecToMs(fraction);
+  return base;
+}
+
+function timestampFromTags(tags = {}, file = null) {
+  const candidates = [tags.DateTimeOriginal, tags.CreateDate, tags.ModifyDate];
+  for (const candidate of candidates) {
+    const base = exifDateToMs(candidate);
+    if (base) {
+      const sub = subSecToMs(tags.SubSecTimeOriginal ?? tags.SubSecTimeDigitized ?? tags.SubSecTime);
+      const baseSecondAligned = Math.floor(base / 1000) * 1000;
+      return { timestampMs: baseSecondAligned + sub, source: "exif" };
+    }
+  }
+  const fallback = Number(file?.lastModified);
+  if (Number.isFinite(fallback) && fallback > 0) {
+    return { timestampMs: Math.trunc(fallback), source: "file" };
+  }
+  return { timestampMs: null, source: "" };
 }
 
 function lensNameFrom(tags = {}) {
@@ -448,6 +517,8 @@ async function parsePhoto(entry) {
     lensMax: null,
     teleconverterFactor: 1,
     teleconverterApplied: false,
+    timestampMs: null,
+    timestampSource: "",
     parsedAt: Date.now(),
     error: ""
   };
@@ -497,6 +568,8 @@ async function parsePhoto(entry) {
       }
     }
 
+    const stamp = timestampFromTags(tags, file);
+
     return {
       ...base,
       lensName,
@@ -506,7 +579,9 @@ async function parsePhoto(entry) {
       lensMin: adjustedRange ? roundFocal(adjustedRange.start) : null,
       lensMax: adjustedRange ? roundFocal(adjustedRange.end) : null,
       teleconverterFactor,
-      teleconverterApplied: teleconverterFactor > 1
+      teleconverterApplied: teleconverterFactor > 1,
+      timestampMs: stamp.timestampMs,
+      timestampSource: stamp.source
     };
   } catch (error) {
     return {
@@ -516,6 +591,14 @@ async function parsePhoto(entry) {
   }
 }
 
+function normalizeBurstSettings(settings) {
+  return {
+    enabled: settings?.enabled !== false,
+    windowSec: Math.min(10, Math.max(0.2, Number(settings?.windowSec) || 1)),
+    focalTolerance: 1
+  };
+}
+
 function addToGroup(groups, record) {
   if (!record || record.error) return;
   const lensName = record.lensName || UNKNOWN_LENS;
@@ -523,6 +606,9 @@ function addToGroup(groups, record) {
     groups.set(lensName, {
       lensName,
       total: 0,
+      totalShots: 0,
+      burstGroups: 0,
+      burstShots: 0,
       withFocal: 0,
       withFocal35mm: 0,
       bodyCounts: new Map(),
@@ -543,7 +629,13 @@ function addToGroup(groups, record) {
   }
 
   const group = groups.get(lensName);
+  const burstSize = Math.max(1, Math.trunc(Number(record._burstSize) || 1));
   group.total += 1;
+  group.totalShots += burstSize;
+  if (burstSize > 1) {
+    group.burstGroups += 1;
+    group.burstShots += burstSize;
+  }
   const bodyName = record.bodyName || UNKNOWN_BODY;
   group.bodyCounts.set(bodyName, (group.bodyCounts.get(bodyName) || 0) + 1);
   group.teleconverterFactor = Math.max(group.teleconverterFactor || 1, record.teleconverterFactor || 1);
@@ -613,6 +705,9 @@ function serializeGroups(groups) {
       return {
         lensName: group.lensName,
         total: group.total,
+        totalShots: group.totalShots || group.total,
+        burstGroups: group.burstGroups || 0,
+        burstShots: group.burstShots || 0,
         withFocal: group.withFocal,
         withFocal35mm: group.withFocal35mm,
         focalMin: group.focalMin,
@@ -648,9 +743,28 @@ function postProgress(summary) {
   });
 }
 
-async function processFiles(files) {
-  cancelled = false;
+function collapseWithBursts(records, burstSettings) {
+  const usable = (records || []).filter(record => record && !record.error);
+  if (self.BurstGroup?.groupBursts) {
+    return self.BurstGroup.groupBursts(usable, normalizeBurstSettings(burstSettings));
+  }
+  return {
+    collapsed: usable.map(record => ({ ...record, _burstSize: 1, _burstSpanMs: 0 })),
+    groups: usable.map(record => [record]),
+    stats: { raw: usable.length, collapsed: usable.length, burstGroups: 0, burstShots: 0, saved: 0 }
+  };
+}
+
+function aggregateRecords(records, burstSettings) {
   const groups = new Map();
+  const burst = collapseWithBursts(records, burstSettings);
+  burst.collapsed.forEach(record => addToGroup(groups, record));
+  return { groups, burst };
+}
+
+async function processFiles(files, burstSettings) {
+  cancelled = false;
+  const normalizedBursts = normalizeBurstSettings(burstSettings);
   const summary = {
     total: files.length,
     processed: 0,
@@ -659,8 +773,13 @@ async function processFiles(files) {
     errors: 0,
     withLens: 0,
     withFocal: 0,
+    collapsed: 0,
+    burstGroups: 0,
+    burstShots: 0,
     startedAt: Date.now()
   };
+  const allRecords = [];
+  const allKeys = [];
 
   for (let offset = 0; offset < files.length; offset += BATCH_SIZE) {
     if (cancelled) {
@@ -691,7 +810,10 @@ async function processFiles(files) {
       if (record.error) summary.errors += 1;
       if (record.lensName && record.lensName !== UNKNOWN_LENS && !record.error) summary.withLens += 1;
       if (record.focalLength && !record.error) summary.withFocal += 1;
-      addToGroup(groups, record);
+      if (!record.error) {
+        allRecords.push(record);
+        allKeys.push(record.cacheKey);
+      }
       summary.processed += 1;
     }
 
@@ -699,19 +821,75 @@ async function processFiles(files) {
     postProgress(summary);
   }
 
+  if (cancelled) {
+    self.postMessage({ type: "cancelled", summary });
+    return;
+  }
+
+  const { groups, burst } = aggregateRecords(allRecords, normalizedBursts);
   const result = serializeGroups(groups);
+  result.burst = burst.stats;
+  result.burstSettings = normalizedBursts;
+  summary.collapsed = burst.stats.collapsed;
+  summary.burstGroups = burst.stats.burstGroups;
+  summary.burstShots = burst.stats.burstShots;
   self.postMessage({
     type: "done",
     summary: {
       ...summary,
       finishedAt: Date.now()
     },
-    result
+    result,
+    cacheKeys: allKeys,
+    burstSettings: normalizedBursts
+  });
+}
+
+async function regroupFromCache(keys, burstSettings) {
+  cancelled = false;
+  const normalizedBursts = normalizeBurstSettings(burstSettings);
+  const stored = await db.photos.bulkGet(keys || []);
+  const records = stored.filter(Boolean);
+  if (!records.length) {
+    self.postMessage({ type: "error", message: "Cached photos were not found. Select the folder again." });
+    return;
+  }
+  const summary = {
+    total: records.length,
+    processed: records.length,
+    cacheHits: records.length,
+    parsed: 0,
+    errors: 0,
+    withLens: 0,
+    withFocal: 0,
+    collapsed: 0,
+    burstGroups: 0,
+    burstShots: 0,
+    startedAt: Date.now()
+  };
+  records.forEach(record => {
+    if (record.lensName && record.lensName !== UNKNOWN_LENS) summary.withLens += 1;
+    if (record.focalLength) summary.withFocal += 1;
+  });
+  const { groups, burst } = aggregateRecords(records, normalizedBursts);
+  const result = serializeGroups(groups);
+  result.burst = burst.stats;
+  result.burstSettings = normalizedBursts;
+  summary.collapsed = burst.stats.collapsed;
+  summary.burstGroups = burst.stats.burstGroups;
+  summary.burstShots = burst.stats.burstShots;
+  self.postMessage({
+    type: "done",
+    regroup: true,
+    summary: { ...summary, finishedAt: Date.now() },
+    result,
+    cacheKeys: keys,
+    burstSettings: normalizedBursts
   });
 }
 
 self.onmessage = async event => {
-  const { type, files } = event.data || {};
+  const { type, files, cacheKeys, burstSettings } = event.data || {};
 
   if (type === "cancel") {
     cancelled = true;
@@ -724,12 +902,23 @@ self.onmessage = async event => {
     return;
   }
 
+  if (type === "regroup") {
+    if (!self.Dexie) {
+      self.postMessage({ type: "error", message: "EXIF cache library did not load." });
+      return;
+    }
+    regroupFromCache(cacheKeys || [], burstSettings).catch(error => {
+      self.postMessage({ type: "error", message: error?.message || "Photo regroup failed." });
+    });
+    return;
+  }
+
   if (type === "start") {
     if (!self.Dexie || !self.exifr) {
       self.postMessage({ type: "error", message: "EXIF parser or cache library did not load." });
       return;
     }
-    processFiles(files || []).catch(error => {
+    processFiles(files || [], burstSettings).catch(error => {
       self.postMessage({ type: "error", message: error?.message || "Photo analysis failed." });
     });
   }

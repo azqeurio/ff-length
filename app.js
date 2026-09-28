@@ -150,7 +150,23 @@ const i18n = {
     addMountFirst: "먼저 마운트를 추가해 주세요. 프리셋을 누르면 바로 시작할 수 있습니다.",
     addStyleFirst: "먼저 스타일을 추가해 주세요.",
     selectedMount: "선택된 마운트",
-    previewRange: "{mount} · 실제 {actual} · 35mm 환산 {equiv} · 환산값은 상단 축에서 표시됩니다."
+    previewRange: "{mount} · 실제 {actual} · 35mm 환산 {equiv} · 환산값은 상단 축에서 표시됩니다.",
+    burstTitle: "연사 1장으로 집계",
+    burstDesc: "같은 렌즈·바디에서 짧은 간격으로 찍은 연사를 1장으로 합산해 초점거리 뻥튀기를 줄입니다.",
+    burstWindowLabel: "연사 간격",
+    burstReaggregate: "설정 적용",
+    burstReaggregateLabel: "다시 집계",
+    burstHint: "촬영시각 EXIF 기준으로 연사를 묶습니다. 시각 정보가 없으면 낱장으로 집계합니다.",
+    burstActive: "연사 {groups}그룹 · {shots}장 → {collapsed}장으로 집계",
+    burstOff: "연사 합산 끔 · {count}장 그대로 집계",
+    burstNone: "연사 그룹 없음 · {count}장 집계",
+    burstRegrouping: "연사 설정을 적용해 다시 집계하는 중입니다.",
+    burstRegrouped: "연사 설정을 적용했습니다: {shots}장 → {collapsed}장 ({groups}그룹).",
+    burstNeedAnalysis: "먼저 사진 폴더를 분석해 주세요. 캐시가 있으면 빠르게 다시 집계합니다.",
+    burstRegroupFailed: "다시 집계하지 못했습니다. 사진 폴더를 다시 선택해 주세요.",
+    dropHint: "이 패널에 사진 파일·폴더를 끌어다 놓아도 분석할 수 있습니다.",
+    analysisError: "분석 오류: {message}",
+    regroupedToast: "연사 설정을 적용했습니다."
   },
   en: {
     appTitle: "Lens Focal Length Roadmap by Mount",
@@ -298,7 +314,23 @@ const i18n = {
     addMountFirst: "Add a mount first. You can start quickly with a preset.",
     addStyleFirst: "Add a style first.",
     selectedMount: "Selected mount",
-    previewRange: "{mount} · actual {actual} · 35mm equivalent {equiv} · equivalent values appear on the top axis."
+    previewRange: "{mount} · actual {actual} · 35mm equivalent {equiv} · equivalent values appear on the top axis.",
+    burstTitle: "Count bursts as one",
+    burstDesc: "Merges rapid shots from the same lens and body so bursts don't inflate focal length stats.",
+    burstWindowLabel: "Burst window",
+    burstReaggregate: "Apply",
+    burstReaggregateLabel: "Re-aggregate",
+    burstHint: "Bursts are grouped by capture time EXIF. Photos without timestamps count individually.",
+    burstActive: "{groups} burst groups · {shots} → {collapsed} photos",
+    burstOff: "Burst merging off · {count} photos counted",
+    burstNone: "No burst groups · {count} photos counted",
+    burstRegrouping: "Re-aggregating with the new burst settings.",
+    burstRegrouped: "Burst settings applied: {shots} → {collapsed} ({groups} groups).",
+    burstNeedAnalysis: "Analyze a photo folder first. Cached photos re-aggregate quickly.",
+    burstRegroupFailed: "Could not re-aggregate. Please select the photo folder again.",
+    dropHint: "You can also drag and drop photo files or folders onto this panel.",
+    analysisError: "Analysis error: {message}",
+    regroupedToast: "Burst settings applied."
   }
 };
 
@@ -389,19 +421,60 @@ const defaultChartSettings = {
 let visualSettings = loadVisualSettings();
 const rawExtensions = new Set(["orf", "raw", "rw2", "arw", "cr2", "cr3", "nef", "dng"]);
 const bodyColorPalette = ["#DC2626", "#2563EB", "#16A34A", "#C026D3", "#EA580C", "#0891B2", "#7C3AED", "#475569"];
+const BURST_KEY = "lensRoadmapBurstSettingsV1";
+const defaultBurstSettings = { enabled: true, windowSec: 1 };
 const exifAnalysis = {
   worker: null,
   running: false,
   cancelRequested: false,
   scan: { total: 0, scanned: 0, jpegs: 0, raws: 0, rawIgnored: 0, otherIgnored: 0 },
-  summary: { total: 0, processed: 0, cacheHits: 0, parsed: 0, errors: 0, withLens: 0, withFocal: 0 },
+  summary: { total: 0, processed: 0, cacheHits: 0, parsed: 0, errors: 0, withLens: 0, withFocal: 0, collapsed: 0, burstGroups: 0, burstShots: 0 },
   result: loadStoredExifResult(),
-  status: t("privacy")
+  status: t("privacy"),
+  lastKeys: [],
+  burstDirty: false
 };
 let exifEditMode = false;
 const selectedExifLensKeys = new Set();
+const countFormatter = new Intl.NumberFormat("ko-KR");
 
 function clone(obj) { return JSON.parse(JSON.stringify(obj)); }
+
+function debounce(fn, wait = 120) {
+  let timer = null;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), wait);
+  };
+}
+
+function loadBurstSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(BURST_KEY));
+    return {
+      enabled: saved?.enabled !== false,
+      windowSec: [0.5, 1, 1.5, 2, 3].includes(Number(saved?.windowSec)) ? Number(saved.windowSec) : defaultBurstSettings.windowSec
+    };
+  } catch {}
+  return { ...defaultBurstSettings };
+}
+
+function readBurstSettingsFromDom() {
+  return {
+    enabled: $("burstEnabled") ? !!$("burstEnabled").checked : loadBurstSettings().enabled,
+    windowSec: $("burstWindow") ? Number($("burstWindow").value) || 1 : 1
+  };
+}
+
+function saveBurstSettings(settings = readBurstSettingsFromDom()) {
+  localStorage.setItem(BURST_KEY, JSON.stringify(settings));
+  return settings;
+}
+
+function applyBurstSettingsToDom(settings = loadBurstSettings()) {
+  if ($("burstEnabled")) $("burstEnabled").checked = settings.enabled !== false;
+  if ($("burstWindow")) $("burstWindow").value = String(settings.windowSec);
+}
 
 function toNumber(value, fallback = 0) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -542,7 +615,7 @@ function applyChartSettingsToDom(settings = loadChartSettings()) {
 }
 
 function emptyExifResult() {
-  return { lenses: [], focalColumns: [], maxCellCount: 0, bodies: [], bodyColors: {} };
+  return { lenses: [], focalColumns: [], maxCellCount: 0, bodies: [], bodyColors: {}, burst: null, burstSettings: null };
 }
 
 function bodyNamesForResult(result = exifAnalysis.result) {
@@ -574,7 +647,9 @@ function recalculateExifResult(result = emptyExifResult()) {
     focalColumns: [],
     maxCellCount: 0,
     bodies: [],
-    bodyColors: result?.bodyColors && typeof result.bodyColors === "object" ? result.bodyColors : {}
+    bodyColors: result?.bodyColors && typeof result.bodyColors === "object" ? result.bodyColors : {},
+    burst: result?.burst && typeof result.burst === "object" ? result.burst : null,
+    burstSettings: result?.burstSettings && typeof result.burstSettings === "object" ? result.burstSettings : null
   };
   const focalColumns = new Set();
   const bodies = new Set(Array.isArray(result?.bodies) ? result.bodies : []);
@@ -1114,17 +1189,18 @@ function heatRatio(count, max, minVisible = 0) {
   return Math.max(emphasized, minVisible);
 }
 
-function heatColor(count, max, minVisible = 0) {
-  const settings = currentVisualSettings();
+function heatColor(count, max, minVisible = 0, visual = null) {
+  const settings = visual || visualSettings;
   return mixColor(settings.heatLowColor, settings.heatHighColor, heatRatio(count, max, minVisible));
 }
 
-function smoothHeatColor(ratio, highColor = currentVisualSettings().heatHighColor) {
-  const settings = currentVisualSettings();
+function smoothHeatColor(ratio, highColor = null, visual = null) {
+  const settings = visual || visualSettings;
+  const high = normalizeHexColor(highColor || settings.heatHighColor, settings.heatHighColor);
   const cutoff = .018;
   if (!Number.isFinite(ratio) || ratio <= cutoff) return settings.heatLowColor;
   const shaped = Math.pow(clamp((ratio - cutoff) / (1 - cutoff), 0, 1), 1.12);
-  return mixColor(settings.heatLowColor, normalizeHexColor(highColor, settings.heatHighColor), shaped);
+  return mixColor(settings.heatLowColor, high, shaped);
 }
 
 function activeTeleconverters() {
@@ -1209,7 +1285,7 @@ function bodyHeatLayersForLens(lens, stats) {
   const names = Object.keys(bodyMaps).filter(name => rawFocalEntries(stats, bodyMaps[name]).length > 0);
   if (!names.length) {
     const entries = focalEntriesForLens(lens, stats);
-    return entries.length ? [{ bodyName: "", color: currentVisualSettings().heatHighColor, entries }] : [];
+    return entries.length ? [{ bodyName: "", color: visualSettings.heatHighColor, entries }] : [];
   }
   return names
     .sort((a, b) => {
@@ -1230,7 +1306,7 @@ function dominantBodyColorForStats(stats) {
     .map(([name, count]) => ({ name, count: Number(count) || 0 }))
     .filter(item => item.name && item.count > 0)
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-  return entries.length ? bodyColorForName(entries[0].name) : currentVisualSettings().heatHighColor;
+  return entries.length ? bodyColorForName(entries[0].name) : visualSettings.heatHighColor;
 }
 
 function ensureExifRoadmapStyle() {
@@ -1481,6 +1557,7 @@ function renderChart() {
       drawDeferredOverlays();
     }
 
+    const heatMax = roadmapExifEnabled() ? heatMaxForResult() : 1;
     plottedItems.forEach(item => {
       const { lens, style, startX, endX, label, color, cy, end, exifStats } = item;
       if (!isZoom) {
@@ -1490,10 +1567,10 @@ function renderChart() {
         const labelX = labelFitsRight ? labelRightX : startX - 12;
         const anchor = labelFitsRight ? "start" : "end";
         const maskX = anchor === "start" ? labelX - 3 : labelX - labelW - 3;
+        const primeColor = exifStats
+          ? mixColor(visual.heatLowColor, dominantBodyColorForStats(exifStats), heatRatio(heatValueForLensStats(exifStats), heatMax, .04))
+          : color;
         const redraw = () => {
-          const primeColor = exifStats
-            ? mixColor(currentVisualSettings().heatLowColor, dominantBodyColorForStats(exifStats), heatRatio(heatValueForLensStats(exifStats), heatMaxForResult(), .04))
-            : color;
           makeEl(svg, "circle", { cx: startX, cy, r: exifStats ? 5.7 : 4.5, fill: primeColor, stroke: exifStats ? visual.chartLineColor : "", "stroke-width": exifStats ? 1.15 : "" });
           makeEl(svg, "rect", { x: maskX, y: cy - 9, width: labelW + 6, height: 15, fill: visual.plotBackgroundColor });
           makeText(svg, { x: labelX, y: cy + 4, "font-size": 10.8, "font-weight": 850, "text-anchor": anchor, fill: visual.chartTextColor }, label);
@@ -1505,9 +1582,9 @@ function renderChart() {
       if (!exifStats) {
         makeEl(svg, "rect", { x: startX - 6, y: cy - 5, width: 8, height: 10, fill: color });
       }
-      const heatDrawn = exifStats ? drawZoomHeatmapLine(svg, defs, item, exifStats, leftChart, chartW, x, heatMaxForResult()) : false;
+      const heatDrawn = exifStats ? drawZoomHeatmapLine(svg, defs, item, exifStats, leftChart, chartW, x, heatMax, visual) : false;
       if (exifStats && !heatDrawn) {
-        drawZoomFallbackHeatLine(svg, item, exifStats, heatMaxForResult());
+        drawZoomFallbackHeatLine(svg, item, exifStats, heatMax, visual);
       } else if (!heatDrawn) {
         makeEl(svg, "line", { x1: startX, y1: cy, x2: endX, y2: cy, stroke: color, "stroke-width": Number(style.width) + 1, "stroke-linecap": "butt", "stroke-dasharray": dashArray(style) });
       }
@@ -1546,7 +1623,7 @@ function renderChart() {
   }
   if (roadmapExifEnabled()) {
     const heatX = plotLeft + 300;
-    drawHeatLegend(svg, heatX, legendY - 4, 58, 5);
+    drawHeatLegend(svg, heatX, legendY - 4, 58, 5, visual);
     makeText(svg, { x: heatX + 68, y: legendY, "font-size": 11, "font-weight": 850, fill: visual.chartTextColor }, t("heatLegend"));
   }
   state.styles.forEach(style => {
@@ -1564,8 +1641,9 @@ function drawTc(svg, leftChart, chartW, x, startX, y, tcEnd, max, color, dash, l
   if (label) makeText(svg, { x: tcX + 8, y: y + 4, "font-size": 10, "font-weight": 800, fill: "#64748B" }, label);
 }
 
-function drawHeatLegend(svg, x, y, width, strokeWidth) {
-  const segments = 160;
+function drawHeatLegend(svg, x, y, width, strokeWidth, visual = null) {
+  const settings = visual || visualSettings;
+  const segments = 64;
   for (let index = 0; index < segments; index += 1) {
     const x1 = x + (width * index) / segments;
     const x2 = x + (width * (index + 1)) / segments + .25;
@@ -1575,27 +1653,27 @@ function drawHeatLegend(svg, x, y, width, strokeWidth) {
       y1: y,
       x2,
       y2: y,
-      stroke: heatColor(count, 100),
+      stroke: heatColor(count, 100, 0, settings),
       "stroke-width": strokeWidth,
       "stroke-linecap": index === 0 || index === segments - 1 ? "round" : "butt"
     });
   }
 }
 
-function drawZoomFallbackHeatLine(svg, item, stats, heatMax) {
+function drawZoomFallbackHeatLine(svg, item, stats, heatMax, visual = null) {
   const lineStart = Math.min(item.startX, item.endX);
   const lineEnd = Math.max(item.startX, item.endX);
   if (lineEnd <= lineStart + 1) return;
-  const visual = currentVisualSettings();
+  const settings = visual || visualSettings;
   const width = Math.max(8, Number(item.style.width) + 6);
   const hasFocalCounts = rawFocalEntries(stats).length > 0;
-  const color = hasFocalCounts ? visual.heatLowColor : heatColor(heatValueForLensStats(stats), heatMax, .04);
+  const color = hasFocalCounts ? settings.heatLowColor : heatColor(heatValueForLensStats(stats), heatMax, .04, settings);
   makeEl(svg, "line", {
     x1: lineStart,
     y1: item.cy,
     x2: lineEnd,
     y2: item.cy,
-    stroke: visual.chartLineColor,
+    stroke: settings.chartLineColor,
     "stroke-width": width + 2,
     "stroke-linecap": "butt",
     opacity: .68
@@ -1611,11 +1689,11 @@ function drawZoomFallbackHeatLine(svg, item, stats, heatMax) {
   });
 }
 
-function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatMax) {
+function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatMax, visual = null) {
   const layers = bodyHeatLayersForLens(item.lens, stats);
   if (!layers.length) return false;
 
-  const visual = currentVisualSettings();
+  const settings = visual || visualSettings;
   const lineStart = Math.min(item.startX, item.endX);
   const lineEnd = Math.max(item.startX, item.endX);
   const lineW = lineEnd - lineStart;
@@ -1638,7 +1716,7 @@ function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatM
     y: outerY,
     width: lineW,
     height: barH,
-    fill: visual.heatLowColor,
+    fill: settings.heatLowColor,
     opacity: .98
   });
 
@@ -1669,7 +1747,7 @@ function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatM
         sigma
       };
     });
-    const segments = Math.max(120, Math.min(760, Math.ceil(innerW * 1.25)));
+    const segments = Math.max(72, Math.min(300, Math.ceil(innerW * 0.55)));
     const segmentW = innerW / segments;
 
     for (let index = 0; index < segments; index += 1) {
@@ -1680,8 +1758,8 @@ function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatM
         const weight = Math.exp(-0.5 * (distance / spot.sigma) ** 2);
         return sum + spot.ratio * weight;
       }, 0), 0, 1);
-      const color = smoothHeatColor(ratio, highColor);
-      if (color === visual.heatLowColor) continue;
+      const color = smoothHeatColor(ratio, highColor, settings);
+      if (color === settings.heatLowColor) continue;
       makeEl(heatLayer, "rect", {
         x: stripX,
         y: innerY,
@@ -1701,7 +1779,7 @@ function drawZoomHeatmapLine(svg, defs, item, stats, leftChart, chartW, x, heatM
     width: lineW,
     height: barH,
     fill: "none",
-    stroke: visual.chartLineColor,
+    stroke: settings.chartLineColor,
     "stroke-width": borderW
   });
 
@@ -1812,7 +1890,27 @@ function emptyRow(body, colspan, text) {
 }
 
 function formatCount(value) {
-  return Number(value || 0).toLocaleString("ko-KR");
+  return countFormatter.format(Number(value) || 0);
+}
+
+function burstSummaryText(result = exifAnalysis.result, summary = exifAnalysis.summary) {
+  const lenses = result?.lenses || [];
+  if (!lenses.length) return "";
+  const burst = result?.burst || {};
+  const collapsed = Number(summary.collapsed) || lenses.reduce((sum, lens) => sum + (Number(lens.total) || 0), 0);
+  const raw = Number(burst.raw) || lenses.reduce((sum, lens) => sum + (Number(lens.totalShots ?? lens.total) || 0), 0);
+  const groups = Number(burst.burstGroups ?? summary.burstGroups) || 0;
+  const enabled = result?.burstSettings ? result.burstSettings.enabled !== false : readBurstSettingsFromDom().enabled;
+  if (!enabled) return t("burstOff", { count: formatCount(raw || collapsed) });
+  if (!groups) return t("burstNone", { count: formatCount(collapsed) });
+  return t("burstActive", { groups: formatCount(groups), shots: formatCount(raw), collapsed: formatCount(collapsed) });
+}
+
+function photoCountLabel(lens) {
+  const total = Number(lens?.total) || 0;
+  const shots = Number(lens?.totalShots ?? total) || 0;
+  if (shots > total) return `${formatCount(total)} (${formatCount(shots)}→${formatCount(total)})`;
+  return formatCount(total);
 }
 
 function rangeLabel(min, max) {
@@ -1864,7 +1962,10 @@ function resetExifSummary(total = 0) {
     parsed: 0,
     errors: 0,
     withLens: 0,
-    withFocal: 0
+    withFocal: 0,
+    collapsed: 0,
+    burstGroups: 0,
+    burstShots: 0
   };
 }
 
@@ -1939,6 +2040,11 @@ function renderBodyColorControls(result = exifAnalysis.result) {
 
   const grid = document.createElement("div");
   grid.className = "body-color-grid";
+  const debouncedBodyRender = debounce(() => {
+    saveStoredExifResult(result);
+    renderChart();
+    renderExifHeatmap(result);
+  }, 80);
   bodies.forEach((bodyName, index) => {
     const label = document.createElement("label");
     label.className = "body-color-item";
@@ -1947,9 +2053,7 @@ function renderBodyColorControls(result = exifAnalysis.result) {
     color.value = bodyColorForName(bodyName, index, result);
     color.addEventListener("input", () => {
       result.bodyColors[bodyName] = normalizeHexColor(color.value, bodyColorPalette[index % bodyColorPalette.length]);
-      saveStoredExifResult(result);
-      renderChart();
-      renderExifHeatmap(result);
+      debouncedBodyRender();
     });
     const text = document.createElement("span");
     text.textContent = bodyName;
@@ -2001,9 +2105,14 @@ function renderExifLensTable(lenses) {
       .sort((a, b) => Number(b[1]) - Number(a[1]) || a[0].localeCompare(b[0]))
       .map(([name, count]) => `${name} ${formatCount(count)}`)
       .join(" · ") || "-";
-    [lens.lensName, formatCount(lens.total), rangeLabel(lens.focalMin, lens.focalMax), rangeLabel(lens.equivMin, lens.equivMax), bodyText].forEach(text => {
+    const countLabel = photoCountLabel(lens);
+    const countTitle = (Number(lens.totalShots ?? lens.total) || 0) > (Number(lens.total) || 0)
+      ? `${formatCount(lens.totalShots)} shots merged into ${formatCount(lens.total)} (${formatCount(lens.burstGroups || 0)} bursts)`
+      : "";
+    [lens.lensName, countLabel, rangeLabel(lens.focalMin, lens.focalMax), rangeLabel(lens.equivMin, lens.equivMax), bodyText].forEach((text, cellIndex) => {
       const cell = document.createElement("td");
       cell.textContent = text;
+      if (cellIndex === 1 && countTitle) cell.title = countTitle;
       row.appendChild(cell);
     });
     const topCell = document.createElement("td");
@@ -2044,6 +2153,7 @@ function renderExifHeatmap(result) {
   }
 
   const maxCell = heatMaxForResult(result);
+  const visual = visualSettings;
   const overview = document.createElement("div");
   overview.className = "heatmap-overview";
   overview.style.setProperty("--heat-cols", columns.length);
@@ -2076,8 +2186,7 @@ function renderExifHeatmap(result) {
       const cell = document.createElement("div");
       cell.className = count ? "heatmap-mini-cell" : "heatmap-mini-cell empty";
       if (count) {
-        const color = heatColor(count, maxCell);
-        cell.style.background = color;
+        cell.style.background = heatColor(count, maxCell, 0, visual);
         cell.title = `${lens.lensName} · ${column}mm · ${formatCount(count)} ${t("files")}`;
       }
       row.appendChild(cell);
@@ -2117,6 +2226,24 @@ function renderExifAnalysis() {
 
   const ignored = $("exifIgnoredText");
   if (ignored) ignored.textContent = t("duplicateIgnored", { raw: formatCount(scan.rawIgnored), other: formatCount(scan.otherIgnored), errors: formatCount(summary.errors) });
+
+  const burstSummary = $("burstSummary");
+  if (burstSummary) {
+    const text = burstSummaryText(result, summary);
+    burstSummary.hidden = !text;
+    burstSummary.textContent = text;
+  }
+  const burstStatus = $("burstStatus");
+  if (burstStatus && (result.lenses || []).length && !exifAnalysis.running) {
+    burstStatus.textContent = burstSummaryText(result, summary) || t("burstHint");
+  } else if (burstStatus && !exifAnalysis.running) {
+    burstStatus.textContent = t("burstHint");
+  }
+  const reaggrBtn = $("reaggregateBurstBtn");
+  if (reaggrBtn) {
+    const canRegroup = !exifAnalysis.running && exifAnalysis.lastKeys.length > 0 && (result.lenses || []).length > 0;
+    reaggrBtn.disabled = !canRegroup;
+  }
 
   renderExifLensTable(result.lenses || []);
   renderBodyColorControls(result);
@@ -2192,10 +2319,46 @@ async function analyzePhotoFolder(fileList) {
   resetExifSummary(photoFiles.length);
   exifAnalysis.status = t("foundPhotos", { count: formatCount(photoFiles.length) });
   renderExifAnalysis();
-  startExifWorker(photoFiles);
+  startExifWorker(photoFiles, saveBurstSettings());
 }
 
-function startExifWorker(files) {
+function handleWorkerDone(message, worker, isRegroup = false) {
+  exifAnalysis.summary = { ...exifAnalysis.summary, ...message.summary };
+  exifAnalysis.result = recalculateExifResult(message.result || emptyExifResult());
+  saveStoredExifResult(exifAnalysis.result);
+  if (Array.isArray(message.cacheKeys) && message.cacheKeys.length) {
+    exifAnalysis.lastKeys = message.cacheKeys;
+  }
+  exifAnalysis.burstDirty = false;
+  exifAnalysis.running = false;
+  exifAnalysis.worker = null;
+  const applied = applyExifStatsToRoadmap({ silent: true, render: false });
+  if (isRegroup || message.regroup) {
+    const burst = message.result?.burst || {};
+    exifAnalysis.status = t("burstRegrouped", {
+      shots: formatCount(burst.raw ?? message.summary.processed),
+      collapsed: formatCount(burst.collapsed ?? message.summary.collapsed ?? message.summary.processed),
+      groups: formatCount(burst.burstGroups ?? 0)
+    });
+    worker.terminate();
+    renderAll();
+    switchTab("Exif");
+    toast(t("regroupedToast"));
+    return;
+  }
+  exifAnalysis.status = t("analysisDone", {
+    processed: formatCount(message.summary.processed),
+    lens: formatCount(message.summary.withLens),
+    focal: formatCount(message.summary.withFocal),
+    replaced: formatCount(applied.replaced),
+    added: formatCount(applied.added)
+  });
+  worker.terminate();
+  renderAll();
+  switchTab("Exif");
+}
+
+function startExifWorker(files, burstSettings = readBurstSettingsFromDom()) {
   if (!window.Worker) {
     exifAnalysis.running = false;
     exifAnalysis.status = t("workerUnsupported");
@@ -2209,29 +2372,14 @@ function startExifWorker(files) {
   worker.onmessage = event => {
     const message = event.data || {};
     if (message.type === "progress") {
-      exifAnalysis.summary = message.summary;
+      exifAnalysis.summary = { ...exifAnalysis.summary, ...message.summary };
       exifAnalysis.status = t("analyzingExif", { cached: formatCount(message.summary.cacheHits), parsed: formatCount(message.summary.parsed) });
       renderExifAnalysis();
       return;
     }
 
     if (message.type === "done") {
-      exifAnalysis.summary = message.summary;
-      exifAnalysis.result = recalculateExifResult(message.result || emptyExifResult());
-      saveStoredExifResult(exifAnalysis.result);
-      exifAnalysis.running = false;
-      exifAnalysis.worker = null;
-      const applied = applyExifStatsToRoadmap({ silent: true, render: false });
-      exifAnalysis.status = t("analysisDone", {
-        processed: formatCount(message.summary.processed),
-        lens: formatCount(message.summary.withLens),
-        focal: formatCount(message.summary.withFocal),
-        replaced: formatCount(applied.replaced),
-        added: formatCount(applied.added)
-      });
-      worker.terminate();
-      renderAll();
-      switchTab("Exif");
+      handleWorkerDone(message, worker, false);
       return;
     }
 
@@ -2247,7 +2395,7 @@ function startExifWorker(files) {
     if (message.type === "error") {
       exifAnalysis.running = false;
       exifAnalysis.worker = null;
-      exifAnalysis.status = `분석 오류: ${message.message}`;
+      exifAnalysis.status = t("analysisError", { message: message.message || "Worker failed" });
       worker.terminate();
       renderExifAnalysis();
     }
@@ -2256,12 +2404,63 @@ function startExifWorker(files) {
   worker.onerror = error => {
     exifAnalysis.running = false;
     exifAnalysis.worker = null;
-    exifAnalysis.status = `분석 오류: ${error.message || "Worker failed"}`;
+    exifAnalysis.status = t("analysisError", { message: error.message || "Worker failed" });
     worker.terminate();
     renderExifAnalysis();
   };
 
-  worker.postMessage({ type: "start", files });
+  worker.postMessage({ type: "start", files, burstSettings });
+}
+
+function reaggregateBursts() {
+  if (exifAnalysis.running) return;
+  if (!exifAnalysis.lastKeys.length || !(exifAnalysis.result?.lenses || []).length) {
+    toast(t("burstNeedAnalysis"));
+    return;
+  }
+  if (!window.Worker) {
+    exifAnalysis.status = t("workerUnsupported");
+    renderExifAnalysis();
+    return;
+  }
+  const burstSettings = saveBurstSettings();
+  exifAnalysis.running = true;
+  exifAnalysis.cancelRequested = false;
+  exifAnalysis.status = t("burstRegrouping");
+  renderExifAnalysis();
+  const worker = new Worker("exif-worker.js");
+  exifAnalysis.worker = worker;
+  worker.onmessage = event => {
+    const message = event.data || {};
+    if (message.type === "done") {
+      handleWorkerDone(message, worker, true);
+      return;
+    }
+    if (message.type === "cancelled") {
+      exifAnalysis.running = false;
+      exifAnalysis.worker = null;
+      exifAnalysis.status = t("analysisCancelled");
+      worker.terminate();
+      renderExifAnalysis();
+      return;
+    }
+    if (message.type === "error") {
+      exifAnalysis.running = false;
+      exifAnalysis.worker = null;
+      exifAnalysis.status = t("burstRegroupFailed");
+      worker.terminate();
+      renderExifAnalysis();
+      toast(t("burstRegroupFailed"));
+    }
+  };
+  worker.onerror = () => {
+    exifAnalysis.running = false;
+    exifAnalysis.worker = null;
+    exifAnalysis.status = t("burstRegroupFailed");
+    worker.terminate();
+    renderExifAnalysis();
+  };
+  worker.postMessage({ type: "regroup", cacheKeys: exifAnalysis.lastKeys, burstSettings });
 }
 
 function cancelExifAnalysis(showStatus = true) {
@@ -2288,12 +2487,14 @@ function clearExifCache() {
   }
   if (!confirm(t("clearCacheConfirm"))) return;
 
-  const dbNames = ["lensRoadmapExifCacheV7", "lensRoadmapExifCacheV6", "lensRoadmapExifCacheV5", "lensRoadmapExifCacheV4", "lensRoadmapExifCacheV3", "lensRoadmapExifCacheV2", "lensRoadmapExifCacheV1"];
+  const dbNames = ["lensRoadmapExifCacheV8", "lensRoadmapExifCacheV7", "lensRoadmapExifCacheV6", "lensRoadmapExifCacheV5", "lensRoadmapExifCacheV4", "lensRoadmapExifCacheV3", "lensRoadmapExifCacheV2", "lensRoadmapExifCacheV1"];
   let done = 0;
   let failed = false;
   const finish = () => {
     exifAnalysis.summary.cacheHits = 0;
     exifAnalysis.result = emptyExifResult();
+    exifAnalysis.lastKeys = [];
+    exifAnalysis.burstDirty = false;
     saveStoredExifResult(exifAnalysis.result);
     exifAnalysis.status = t("cacheCleared");
     renderAll();
@@ -2489,6 +2690,27 @@ function applyLanguage() {
   setText("#applyExifRoadmapBtn", "applyExif");
   setText("#cancelExifScanBtn", "cancelAnalysis");
   setText("#clearExifCacheBtn", "clearExifCache");
+  setText("#exifDropHint", "dropHint");
+  setText("#reaggregateBurstBtn", "burstReaggregate");
+  setFieldLabel("burstWindow", "burstWindowLabel");
+  setFieldLabel("reaggregateBurstBtn", "burstReaggregateLabel");
+  const burstToggle = $("burstEnabled")?.closest(".toggle-row");
+  if (burstToggle) {
+    const strong = burstToggle.querySelector("strong");
+    const desc = burstToggle.querySelector("p");
+    if (strong) strong.textContent = t("burstTitle");
+    if (desc) desc.textContent = t("burstDesc");
+  }
+  const burstWindowSelect = $("burstWindow");
+  if (burstWindowSelect) {
+    const suffix = currentLanguage === "en" ? "within" : "이내";
+    [...burstWindowSelect.options].forEach(option => {
+      const seconds = Number(option.value);
+      option.textContent = currentLanguage === "en"
+        ? `Within ${seconds.toFixed(1)}s`
+        : `${seconds.toFixed(1)}초 ${suffix}`;
+    });
+  }
   renderExifEditControls();
   renderBodyColorControls(exifAnalysis.result);
   const folderLabel = $("photoFolderInput")?.parentElement;
@@ -2516,7 +2738,8 @@ function applyLanguage() {
   setText("#downloadSheetTemplateBtn", "excelDownload");
   const excelUpload = $("importSheetInput")?.parentElement;
   if (excelUpload) excelUpload.childNodes[0].textContent = t("excelUpload");
-  setText(".sheet-note", "excelNote");
+  const excelNote = $("importSheetInput")?.closest(".panel")?.querySelector(".sheet-note");
+  if (excelNote) excelNote.textContent = t("excelNote");
   setText(".example-box summary", "exampleOpen");
 
   setFieldLabel("chartTitle", "chartTitleLabel");
@@ -2528,21 +2751,19 @@ function applyLanguage() {
   setOptions("displayMode", { actual: "axisActual", equiv: "axisEquiv" });
   setOptions("labelMode", { both: "labelBoth", actual: "labelActual", equiv: "labelEquiv" });
   setOptions("scaleMode", { log: "logScale", linear: "linearScale" });
-  const toggles = document.querySelectorAll(".toggle-row");
-  if (toggles[0]) {
-    toggles[0].querySelector("strong").textContent = t("usedRangeOnly");
-    toggles[0].querySelector("p").textContent = t("usedRangeDesc");
-  }
+  const toggleByInput = (id, titleKey, descKey) => {
+    const row = $(id)?.closest(".toggle-row");
+    if (!row) return;
+    const strong = row.querySelector("strong");
+    const desc = row.querySelector("p");
+    if (strong) strong.textContent = t(titleKey);
+    if (desc) desc.textContent = t(descKey);
+  };
+  toggleByInput("autoCropAxis", "usedRangeOnly", "usedRangeDesc");
   setFieldLabel("axisMin", "axisMin");
   setFieldLabel("axisMax", "axisMax");
-  if (toggles[1]) {
-    toggles[1].querySelector("strong").textContent = t("showTc");
-    toggles[1].querySelector("p").textContent = t("showTcDesc");
-  }
-  if (toggles[2]) {
-    toggles[2].querySelector("strong").textContent = t("showGuides");
-    toggles[2].querySelector("p").textContent = t("showGuidesDesc");
-  }
+  toggleByInput("showTeleconverters", "showTc", "showTcDesc");
+  toggleByInput("showZoomGuides", "showGuides", "showGuidesDesc");
   setFieldLabel("heatLowColor", "heatLow");
   setFieldLabel("heatHighColor", "heatHigh");
   setFieldLabel("chartBackgroundColor", "chartBg");
@@ -2712,7 +2933,7 @@ function updateLensPreview() {
   const start = Number($("focalStart").value);
   const end = $("focalEnd").value ? Number($("focalEnd").value) : start;
   if (!start || !end) {
-    preview.textContent = "렌즈 정보를 입력하면 실제/환산 화각이 여기에 표시됩니다.";
+    preview.textContent = t("lensPreviewEmpty");
     return;
   }
 
@@ -3045,11 +3266,36 @@ function sheetLib() {
   return null;
 }
 
-function importSheet(file) {
-  const xlsx = sheetLib();
+let xlsxLoadPromise = null;
+function loadXlsxLib() {
+  const existing = sheetLib();
+  if (existing) return Promise.resolve(existing);
+  if (xlsxLoadPromise) return xlsxLoadPromise;
+  xlsxLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "vendor/xlsx.full.min.js";
+    script.defer = true;
+    script.onload = () => {
+      const lib = sheetLib();
+      if (lib) resolve(lib);
+      else reject(new Error("XLSX failed to load"));
+    };
+    script.onerror = () => reject(new Error("XLSX failed to load"));
+    document.head.appendChild(script);
+  });
+  return xlsxLoadPromise;
+}
+
+async function importSheet(file) {
+  let xlsx = sheetLib();
   if (!xlsx) {
-    alert("Excel 파일을 읽는 라이브러리를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
-    return;
+    try {
+      toast(currentLanguage === "en" ? "Loading Excel library..." : "Excel 라이브러리를 불러오는 중입니다...");
+      xlsx = await loadXlsxLib();
+    } catch {
+      alert("Excel 파일을 읽는 라이브러리를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      return;
+    }
   }
 
   const reader = new FileReader();
@@ -3086,25 +3332,36 @@ function importSheet(file) {
   reader.readAsArrayBuffer(file);
 }
 
-function downloadSheetTemplate() {
+async function downloadSheetTemplate() {
   const rows = [
     { "렌즈명": "M.Zuiko Digital ED 12-40mm F2.8 PRO II", "마운트": "Micro Four Thirds", "크롭": 2, "스타일": "PRO / Leica", "초점거리": "12-40mm", "시작mm": 12, "끝mm": 40, "유형": "Zoom", "1.4x": "", "2x": "" },
     { "렌즈명": "M.Zuiko Digital ED 25mm F1.2 PRO", "마운트": "Micro Four Thirds", "크롭": 2, "스타일": "PRO / Leica", "초점거리": "25mm", "시작mm": 25, "끝mm": 25, "유형": "Prime", "1.4x": "", "2x": "" }
   ];
 
-  const xlsx = sheetLib();
-  if (xlsx) {
+  const writeCsv = () => {
+    const headers = Object.keys(rows[0]);
+    const csv = "\uFEFF" + [headers.join(","), ...rows.map(row => headers.map(header => `"${String(row[header] ?? "").replace(/"/g, '""')}"`).join(","))].join("\n");
+    downloadBlob(csv, "lens-roadmap-template.csv", "text/csv;charset=utf-8");
+  };
+
+  let xlsx = sheetLib();
+  if (!xlsx) {
+    try {
+      xlsx = await loadXlsxLib();
+    } catch {
+      writeCsv();
+      return;
+    }
+  }
+  try {
     const worksheet = xlsx.utils.json_to_sheet(rows);
     const workbook = xlsx.utils.book_new();
     xlsx.utils.book_append_sheet(workbook, worksheet, "Lenses");
     const content = xlsx.write(workbook, { bookType: "xlsx", type: "array" });
     downloadBlob(new Blob([content], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "lens-roadmap-template.xlsx");
-    return;
+  } catch {
+    writeCsv();
   }
-
-  const headers = Object.keys(rows[0]);
-  const csv = "\uFEFF" + [headers.join(","), ...rows.map(row => headers.map(header => `"${String(row[header] ?? "").replace(/"/g, '""')}"`).join(","))].join("\n");
-  downloadBlob(csv, "lens-roadmap-template.csv", "text/csv;charset=utf-8");
 }
 
 function switchTab(tab) {
@@ -3180,12 +3437,74 @@ function bind() {
   $("applyExifRoadmapBtn").addEventListener("click", () => applyExifStatsToRoadmap());
   $("cancelExifScanBtn").addEventListener("click", () => cancelExifAnalysis());
   $("clearExifCacheBtn").addEventListener("click", clearExifCache);
+  $("reaggregateBurstBtn")?.addEventListener("click", reaggregateBursts);
+  $("burstEnabled")?.addEventListener("change", () => {
+    saveBurstSettings();
+    exifAnalysis.burstDirty = exifAnalysis.lastKeys.length > 0;
+    renderExifAnalysis();
+  });
+  $("burstWindow")?.addEventListener("change", () => {
+    saveBurstSettings();
+    exifAnalysis.burstDirty = exifAnalysis.lastKeys.length > 0;
+    renderExifAnalysis();
+  });
   $("editExifLensesBtn")?.addEventListener("click", () => {
     exifEditMode = !exifEditMode;
     if (!exifEditMode) selectedExifLensKeys.clear();
     renderExifAnalysis();
   });
   $("deleteSelectedExifBtn")?.addEventListener("click", () => removeExifLenses([...selectedExifLensKeys]));
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && exifAnalysis.running) cancelExifAnalysis();
+  });
+  const exifPanel = $("applyExifRoadmapBtn")?.closest(".panel");
+  if (exifPanel) {
+    const collectDroppedFiles = async dataTransfer => {
+      const files = [];
+      if (dataTransfer?.items?.length && dataTransfer.items[0]?.webkitGetAsEntry) {
+        const entries = [...dataTransfer.items].map(item => item.webkitGetAsEntry()).filter(Boolean);
+        const walk = entry => new Promise(resolve => {
+          if (entry.isFile) {
+            entry.file(file => {
+              Object.defineProperty(file, "webkitRelativePath", { value: entry.fullPath.replace(/^\//, ""), configurable: true });
+              files.push(file);
+              resolve();
+            }, () => resolve());
+          } else if (entry.isDirectory) {
+            const reader = entry.createReader();
+            const readAll = () => reader.readEntries(async batch => {
+              if (!batch.length) {
+                resolve();
+                return;
+              }
+              for (const child of batch) await walk(child);
+              readAll();
+            }, () => resolve());
+            readAll();
+          } else {
+            resolve();
+          }
+        });
+        for (const entry of entries) await walk(entry);
+        return files;
+      }
+      return [...(dataTransfer?.files || [])];
+    };
+    ["dragenter", "dragover"].forEach(name => exifPanel.addEventListener(name, e => {
+      e.preventDefault();
+      exifPanel.classList.add("drag-over");
+    }));
+    ["dragleave", "drop"].forEach(name => exifPanel.addEventListener(name, e => {
+      e.preventDefault();
+      if (name === "dragleave" && exifPanel.contains(e.relatedTarget)) return;
+      exifPanel.classList.remove("drag-over");
+    }));
+    exifPanel.addEventListener("drop", async e => {
+      if (exifAnalysis.running) return;
+      const files = await collectDroppedFiles(e.dataTransfer);
+      if (files.length) analyzePhotoFolder(files);
+    });
+  }
 
   $("lensName").addEventListener("input", () => {
     applyParsedFocal(false);
@@ -3215,12 +3534,13 @@ function bind() {
     renderAll();
   });
 
+  const debouncedChartRender = debounce(() => {
+    saveChartSettings();
+    renderChart();
+    updateLensPreview();
+  }, 90);
   ["displayMode", "labelMode", "scaleMode", "chartTitle", "autoCropAxis", "axisMin", "axisMax", "showTeleconverters", "showZoomGuides"].forEach(id => {
-    $(id).addEventListener("input", () => {
-      saveChartSettings();
-      renderChart();
-      updateLensPreview();
-    });
+    $(id).addEventListener("input", debouncedChartRender);
     $(id).addEventListener("change", () => {
       saveChartSettings();
       renderChart();
@@ -3228,15 +3548,16 @@ function bind() {
     });
   });
 
+  const debouncedVisualRender = debounce(() => {
+    visualSettings = readVisualSettingsFromDom();
+    saveVisualSettings();
+    renderChart();
+    renderExifHeatmap(exifAnalysis.result);
+  }, 60);
   Object.keys(defaultVisualSettings).forEach(id => {
     const node = $(id);
     if (!node) return;
-    node.addEventListener("input", () => {
-      visualSettings = readVisualSettingsFromDom();
-      saveVisualSettings();
-      renderChart();
-      renderExifHeatmap(exifAnalysis.result);
-    });
+    node.addEventListener("input", debouncedVisualRender);
   });
 
   $("tabMounts").addEventListener("click", () => switchTab("Mounts"));
@@ -3249,5 +3570,6 @@ reorderSidebarPanels();
 bind();
 applyChartSettingsToDom();
 applyVisualSettingsToDom();
+applyBurstSettingsToDom();
 applyLanguage();
 renderAll();
